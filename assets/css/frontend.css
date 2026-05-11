@@ -1,0 +1,74 @@
+/**
+ * CLKT Frontend Styles - Minimal & Unobtrusive
+ */
+
+.clkt-permaweb-links {
+    margin: 2em 0;
+    padding: 1.25em;
+    border-left: 3px solid #D4A857;
+}
+
+.clkt-permaweb-heading {
+    margin: 0 0 0.75em 0;
+}
+
+.clkt-permaweb-versions {
+    margin-bottom: 1em;
+}
+
+.clkt-permaweb-version {
+    margin: 0.5em 0;
+}
+
+.clkt-permaweb-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    text-decoration: none;
+}
+
+.clkt-permaweb-link:hover {
+    text-decoration: underline;
+}
+
+.clkt-version-badge {
+    font-size: 0.75em;
+    padding: 0.2em 0.4em;
+    background: #28a745;
+    color: white;
+    border-radius: 3px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.clkt-version-date {
+    opacity: 0.7;
+    font-size: 0.9em;
+    margin-left: 0.5em;
+}
+
+.clkt-permaweb-footer {
+    margin-top: 1em;
+    padding-top: 0.75em;
+    border-top: 1px solid currentColor;
+    opacity: 0.5;
+}
+
+.clkt-powered-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    text-decoration: none;
+    font-size: 0.85em;
+    color: inherit;
+}
+
+.clkt-powered-by:hover {
+    opacity: 0.8;
+}
+
+.clkt-logo {
+    width: 16px;
+    height: 16px;
+    display: inline-block;
+}

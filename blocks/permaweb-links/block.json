@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "clkt/permaweb-links",
+  "version": "1.0.0",
+  "title": "Arweave Permaweb Links",
+  "category": "widgets",
+  "icon": "cloud",
+  "description": "Display permanent Arweave storage links for this post.",
+  "keywords": ["arweave", "permaweb", "permanent", "storage", "clkt"],
+  "textdomain": "clkt-save-forever-collect-together",
+  "supports": {
+    "html": false,
+    "align": true
+  },
+  "attributes": {
+    "showTitle": {
+      "type": "boolean",
+      "default": true
+    },
+    "customTitle": {
+      "type": "string",
+      "default": ""
+    },
+    "showHistory": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "editorScript": "file:./build/index.js"
+}

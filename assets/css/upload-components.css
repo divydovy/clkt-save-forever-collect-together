@@ -1,0 +1,621 @@
+/**
+ * Content Cloud Upload Components CSS
+ * Shared styles for all upload contexts
+ */
+
+/* ============================================
+   General Upload Manager
+   ============================================ */
+
+.clkt-upload-manager {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Context-specific adjustments */
+.clkt-context-single .clkt-upload-manager {
+    /* Tighter spacing for sidebar */
+    margin: 0;
+    padding: 0;
+}
+
+.clkt-context-bulk .clkt-upload-manager {
+    /* More breathing room for full-width */
+}
+
+/* ============================================
+   Status Indicators
+   ============================================ */
+
+.clkt-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.9em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.clkt-status__icon {
+    line-height: 1;
+}
+
+.clkt-status__text {
+    line-height: 1;
+}
+
+/* Status variants */
+.clkt-status--pending {
+    color: #666;
+    background: #f5f5f5;
+}
+
+.clkt-status--uploading {
+    color: #0073aa;
+    background: #e5f5ff;
+    animation: clkt-pulse 1.5s ease-in-out infinite;
+}
+
+.clkt-status--success {
+    color: #28a745;
+    background: #e8f5e9;
+}
+
+.clkt-status--error {
+    color: #d63638;
+    background: #ffeaea;
+}
+
+.clkt-status--reusing {
+    color: #2ea44f;
+    background: #e8f9ec;
+}
+
+.clkt-status--uptodate {
+    color: #2271b1;
+    background: #e8f1f9;
+}
+
+.clkt-status--skipped {
+    color: #999;
+    background: #f0f0f0;
+}
+
+.clkt-status--cancelled {
+    color: #666;
+    background: #f5f5f5;
+    text-decoration: line-through;
+}
+
+/* Link status */
+a.clkt-status {
+    text-decoration: none;
+}
+
+a.clkt-status:hover {
+    opacity: 0.8;
+    text-decoration: underline;
+}
+
+/* Pulse animation for uploading */
+@keyframes clkt-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* ============================================
+   Item List
+   ============================================ */
+
+.clkt-item {
+    padding: 12px 0;
+    margin-bottom: 0;
+    border: none;
+    border-top: 1px solid #dcdcde;
+    border-radius: 0;
+    background: transparent;
+    transition: all 0.2s ease;
+}
+
+.clkt-item:first-child {
+    border-top: none;
+    padding-top: 0;
+}
+
+.clkt-item:hover {
+    background: #f6f7f7;
+}
+
+.clkt-item--post {
+    /* Blue border now on container */
+}
+
+.clkt-item--attachment {
+    border-left: 4px solid #28a745;
+}
+
+.clkt-item--nested {
+    margin-left: 20px;
+    margin-top: 6px;
+    padding: 8px;
+    background: #f9f9f9;
+    border: 1px solid #e0e0e0;
+}
+
+/* Item currently being uploaded */
+.clkt-item--current {
+    border-color: #0073aa;
+    background: #f0f8ff;
+    box-shadow: 0 2px 6px rgba(0, 115, 170, 0.2);
+}
+
+/* Item header */
+.clkt-item__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.clkt-item__icon {
+    font-size: 1.2em;
+    line-height: 1;
+}
+
+.clkt-item__title {
+    flex: 1;
+    font-weight: 600;
+    color: #23282d;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0; /* Allows flex item to shrink below content size */
+}
+
+.clkt-item__title:hover {
+    color: #0073aa;
+    text-decoration: underline;
+}
+
+.clkt-item__title--reusing {
+    color: #2ea44f;
+}
+
+.clkt-item__view-link {
+    font-size: 0.9em;
+    text-decoration: none;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.clkt-item__view-link:hover {
+    opacity: 1;
+}
+
+/* Item meta */
+.clkt-item__meta {
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 6px;
+}
+
+.clkt-item__filename {
+    font-family: monospace;
+    background: #f5f5f5;
+    padding: 1px 4px;
+    border-radius: 2px;
+    word-break: break-all;
+    overflow-wrap: break-word;
+}
+
+/* Item details */
+.clkt-item__details {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.9em;
+}
+
+.clkt-item__size {
+    color: #666;
+}
+
+.clkt-item__cost {
+    color: #0073aa;
+    font-weight: 500;
+}
+
+.clkt-cost--reusing {
+    color: #2ea44f;
+    font-weight: 500;
+}
+
+.clkt-item__status {
+    margin-left: auto;
+}
+
+/* Attachments container */
+.clkt-item__attachments {
+    margin-top: 8px;
+}
+
+/* Compact view adjustments */
+.clkt-context-single .clkt-item {
+    padding: 10px;
+    font-size: 0.95em;
+}
+
+.clkt-context-single .clkt-item__details {
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ============================================
+   Upload Preview
+   ============================================ */
+
+.clkt-preview-wrapper {
+    margin: 0 -12px;
+    padding: 0 12px;
+}
+
+.clkt-preview {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+}
+
+.clkt-preview__summary {
+    margin-bottom: 12px;
+    /* Remove visual styling - handled inline to match WordPress style */
+}
+
+.clkt-preview__summary h4 {
+    margin: 0 0 12px 0;
+    font-size: 1.1em;
+    color: #23282d;
+}
+
+.clkt-preview__counts {
+    margin: 8px 0;
+    font-size: 1em;
+    color: #23282d;
+}
+
+.clkt-preview__cost {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #d0e5f5;
+}
+
+.clkt-preview__cost-item {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
+    font-size: 0.95em;
+}
+
+.clkt-preview__cost-label {
+    color: #666;
+}
+
+.clkt-preview__cost-value {
+    font-weight: 600;
+    color: #23282d;
+}
+
+.clkt-preview__items {
+    max-height: 500px;
+    overflow-y: auto;
+    margin: 12px 0;
+}
+
+.clkt-preview__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* ============================================
+   Upload Progress
+   ============================================ */
+
+.clkt-progress {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.clkt-progress__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.clkt-progress__header h4 {
+    margin: 0;
+    font-size: 1.1em;
+    color: #23282d;
+}
+
+.clkt-progress__bar-container {
+    margin-bottom: 20px;
+}
+
+.clkt-progress__bar {
+    width: 100%;
+    height: 24px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.clkt-progress__fill {
+    height: 100%;
+    background: linear-gradient(90deg, #0073aa 0%, #00a0d2 100%);
+    transition: width 0.3s ease;
+    border-radius: 4px;
+}
+
+.clkt-progress__text {
+    display: block;
+    text-align: center;
+    font-size: 0.9em;
+    color: #666;
+    margin-top: 6px;
+}
+
+.clkt-progress__items {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 16px;
+}
+
+.clkt-progress-cancel {
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    color: #666;
+}
+
+.clkt-progress-cancel:hover {
+    background: #ffeaea;
+    border-color: #d63638;
+    color: #d63638;
+}
+
+/* ============================================
+   Upload Results
+   ============================================ */
+
+.clkt-results {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.clkt-results__summary {
+    padding: 16px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
+
+.clkt-results--success .clkt-results__summary {
+    background: #e8f5e9;
+    border-left: 4px solid #28a745;
+}
+
+.clkt-results--partial .clkt-results__summary {
+    background: #fff8e6;
+    border-left: 4px solid #f0ad4e;
+}
+
+.clkt-results--error .clkt-results__summary {
+    background: #ffeaea;
+    border-left: 4px solid #d63638;
+}
+
+.clkt-results__summary h4 {
+    margin: 0 0 12px 0;
+    font-size: 1.1em;
+    color: #23282d;
+}
+
+.clkt-results__counts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.clkt-results__count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.clkt-results__count-icon {
+    font-size: 1.1em;
+}
+
+.clkt-results__count-label {
+    font-size: 0.95em;
+    color: #23282d;
+}
+
+.clkt-results__count--success {
+    border-left: 3px solid #28a745;
+}
+
+.clkt-results__count--error {
+    border-left: 3px solid #d63638;
+}
+
+.clkt-results__count--reused {
+    border-left: 3px solid #2ea44f;
+}
+
+.clkt-results__count--cancelled {
+    border-left: 3px solid #999;
+}
+
+.clkt-results__costs {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.clkt-results__cost-item {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
+    font-size: 0.95em;
+}
+
+.clkt-results__cost-label {
+    color: #666;
+}
+
+.clkt-results__cost-value {
+    font-weight: 600;
+    color: #23282d;
+}
+
+.clkt-results__items {
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 16px 0;
+}
+
+.clkt-results__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #ddd;
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+
+.clkt-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    font-size: 14px;
+    line-height: 1.5;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    text-align: center;
+}
+
+.clkt-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.clkt-btn--primary {
+    background: #0073aa;
+    color: #fff;
+    border-color: #0073aa;
+}
+
+.clkt-btn--primary:hover:not(:disabled) {
+    background: #005a87;
+    border-color: #005a87;
+}
+
+.clkt-btn--secondary {
+    background: #f0f0f0;
+    color: #23282d;
+    border-color: #ddd;
+}
+
+.clkt-btn--secondary:hover:not(:disabled) {
+    background: #e0e0e0;
+    border-color: #ccc;
+}
+
+.clkt-btn--small {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* ============================================
+   Utilities
+   ============================================ */
+
+/* Scrollbar styling */
+.clkt-preview__items::-webkit-scrollbar,
+.clkt-progress__items::-webkit-scrollbar,
+.clkt-results__items::-webkit-scrollbar {
+    width: 8px;
+}
+
+.clkt-preview__items::-webkit-scrollbar-track,
+.clkt-progress__items::-webkit-scrollbar-track,
+.clkt-results__items::-webkit-scrollbar-track {
+    background: #f0f0f0;
+    border-radius: 4px;
+}
+
+.clkt-preview__items::-webkit-scrollbar-thumb,
+.clkt-progress__items::-webkit-scrollbar-thumb,
+.clkt-results__items::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 4px;
+}
+
+.clkt-preview__items::-webkit-scrollbar-thumb:hover,
+.clkt-progress__items::-webkit-scrollbar-thumb:hover,
+.clkt-results__items::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+/* Responsive adjustments */
+@media (max-width: 782px) {
+    .clkt-item__details {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .clkt-item__status {
+        margin-left: 0;
+    }
+
+    .clkt-preview__actions,
+    .clkt-results__actions {
+        flex-direction: column;
+    }
+
+    .clkt-btn {
+        width: 100%;
+    }
+}
+
+/* Print styles */
+@media print {
+    .clkt-preview__actions,
+    .clkt-results__actions,
+    .clkt-progress__bar-container {
+        display: none;
+    }
+}

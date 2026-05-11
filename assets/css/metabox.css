@@ -1,0 +1,611 @@
+/* Accessibility: Screen reader only text */
+.screen-reader-text {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+/* Ensure metabox title aligns with WordPress standards */
+#clkt_permaweb_meta_box .hndle {
+    font-size: 14px;
+    padding: 8px 12px;
+    margin: 0;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+/* Hide upload action buttons on single post edit screen (they're for bulk upload only) */
+.clkt-context-single .clkt-preview__actions {
+    display: none !important;
+}
+
+.clkt-permaweb-container {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Header */
+.clkt-header {
+    background: white;
+    padding: 12px;
+    border-bottom: 1px solid #dcdcde;
+    margin: -12px -12px 0 -12px;
+}
+
+/* Wallet Status */
+.clkt-wallet-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+}
+
+.clkt-wallet-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.clkt-wallet-address {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+}
+
+.clkt-wallet-icon {
+    width: 16px;
+    height: 16px;
+    color: #646970;
+}
+
+.clkt-wallet-address {
+    color: #2c3338;
+}
+
+.clkt-wallet-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.clkt-wallet-badge.connected {
+    background: #00a32a;
+    color: white;
+}
+
+.clkt-wallet-badge.disconnected {
+    background: #d63638;
+    color: white;
+}
+
+.clkt-wallet-actions {
+    flex-shrink: 0;
+}
+
+.clkt-wallet-actions button {
+    background: #2271b1;
+    color: white;
+    border: 1px solid #2271b1;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.clkt-wallet-actions button:hover {
+    background: #135e96;
+    border-color: #135e96;
+}
+
+/* Main Content */
+.clkt-main {
+    padding: 0;
+    background: white;
+}
+
+.clkt-section {
+    margin-bottom: 8px;
+}
+
+.clkt-separator {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 8px 0;
+}
+
+/* Settings */
+.clkt-setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.clkt-setting-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    flex: 1;
+}
+
+.clkt-setting-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.clkt-setting-icon.globe {
+    color: #2563eb;
+}
+
+.clkt-setting-icon.file {
+    color: #ea580c;
+}
+
+.clkt-setting-icon.key {
+    color: #2563eb;
+}
+
+.clkt-setting-icon.lock {
+    color: #d97706;
+}
+
+.clkt-setting-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.clkt-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.clkt-badge.on {
+    background: #dcfce7;
+    color: #14532d;
+}
+
+.clkt-badge.off {
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+
+.clkt-settings-link {
+    font-size: 11px;
+    color: #8b5cf6;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.clkt-settings-link:hover {
+    color: #7c3aed;
+}
+
+.clkt-select {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+}
+
+/* Toggle Switch */
+.clkt-toggle {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+}
+
+.clkt-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.clkt-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    transition: .3s;
+    border-radius: 20px;
+}
+
+.clkt-toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+
+input:checked+.clkt-toggle-slider {
+    background-color: #8b5cf6;
+}
+
+input:checked+.clkt-toggle-slider:before {
+    transform: translateX(16px);
+}
+
+/* Encryption subsection */
+.clkt-subsection {
+    margin-top: 8px;
+}
+
+.clkt-password-input {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    margin-top: 8px;
+}
+
+/* Status Indicator */
+.clkt-status-indicator {
+    display: flex;
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    background: #f9fafb;
+    border-radius: 4px;
+}
+
+.clkt-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+
+.clkt-status-dot.green {
+    background: #22c55e;
+}
+
+.clkt-status-dot.red {
+    background: #ef4444;
+}
+
+.clkt-status-text {
+    font-size: 12px;
+    color: #4b5563;
+    line-height: 1.4;
+}
+
+.clkt-status-override {
+    color: #ea580c;
+    margin-left: 4px;
+}
+
+/* Action Button */
+.clkt-button {
+    width: 100%;
+    padding: 10px;
+    background: #8b5cf6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-center: center;
+    gap: 8px;
+}
+
+.clkt-button:hover:not(:disabled) {
+    background: #7c3aed;
+}
+
+.clkt-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.clkt-button-icon {
+    width: 16px;
+    height: 16px;
+}
+
+/* Auto-save message */
+.clkt-auto-save-message {
+    padding: 12px 12px 12px 8px;
+    margin: 0 0 12px 0;
+    border: none;
+    border-radius: 4px;
+}
+
+.clkt-auto-save-message.will-upload {
+    background: #edfaef;
+    border-left: 4px solid #00a32a;
+}
+
+.clkt-auto-save-message.will-reupload {
+    background: #fcf9e8;
+    border-left: 4px solid #dba617;
+}
+
+.clkt-auto-save-message.will-not-upload {
+    background: #fcf0f1;
+    border-left: 4px solid #d63638;
+}
+
+.clkt-auto-save-title {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1d2327;
+    line-height: 1.4;
+}
+
+.clkt-auto-save-title svg {
+    color: #00a32a;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+}
+
+.clkt-auto-save-message.will-not-upload .clkt-auto-save-title svg {
+    color: #d63638;
+}
+
+.clkt-auto-save-desc {
+    font-size: 13px;
+    color: #2c3338;
+    line-height: 1.5;
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 8px;
+}
+
+.clkt-auto-save-desc .clkt-status-item {
+    grid-column: 2;
+    margin-bottom: 4px;
+}
+
+.clkt-auto-save-desc .clkt-status-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Version link */
+.clkt-version-link {
+    display: block;
+    text-align: center;
+    margin-top: 12px;
+    font-size: 12px;
+    color: #8b5cf6;
+    text-decoration: none;
+}
+
+.clkt-version-link:hover {
+    color: #7c3aed;
+    text-decoration: underline;
+}
+
+/* Current Status Header */
+.clkt-current-status-header {
+    background: #f9fafb;
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 0;
+}
+
+.clkt-current-status-header .clkt-timeline-item {
+    display: flex;
+    align-items: start;
+    gap: 12px;
+}
+
+/* Version Timeline */
+.clkt-timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.clkt-timeline-header:hover {
+    color: #8b5cf6;
+}
+
+.clkt-timeline-chevron {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.2s;
+}
+
+.clkt-timeline-chevron.open {
+    transform: rotate(180deg);
+}
+
+.clkt-timeline-content {
+    display: none;
+    margin-top: 12px;
+    position: relative;
+}
+
+.clkt-timeline-content.open {
+    display: block;
+}
+
+.clkt-timeline-line {
+    position: absolute;
+    left: 11px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #e5e7eb;
+}
+
+.clkt-timeline-item {
+    position: relative;
+    display: flex;
+    align-items: start;
+    gap: 12px;
+    padding-bottom: 12px;
+}
+
+.clkt-timeline-dot {
+    position: relative;
+    z-index: 1;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.clkt-timeline-dot.current {
+    background: #2271b1;
+    color: white;
+}
+
+.clkt-timeline-dot.uploaded {
+    background: #dcfce7;
+    color: #14532d;
+    border: 1px solid #86efac;
+}
+
+.clkt-timeline-dot.not-uploaded {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #d1d5db;
+}
+
+.clkt-timeline-details {
+    flex: 1;
+}
+
+.clkt-timeline-version {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.clkt-timeline-date {
+    font-size: 11px;
+    color: #6b7280;
+}
+
+.clkt-timeline-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.clkt-timeline-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.clkt-timeline-badge.confirmed {
+    background: #dcfce7;
+    color: #14532d;
+}
+
+.clkt-timeline-badge.pending {
+    background: #fef3c7;
+    color: #78350f;
+}
+
+.clkt-timeline-badge.test {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+}
+
+.clkt-status-test {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+}
+
+.clkt-settings-toggle:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.clkt-timeline-tx {
+    font-size: 10px;
+    color: #9ca3af;
+    font-family: monospace;
+    margin-top: 2px;
+}
+
+.clkt-timeline-link {
+    color: #8b5cf6;
+    text-decoration: none;
+}
+
+.clkt-timeline-link:hover {
+    color: #7c3aed;
+}
+
+/* Upload status spinner */
+.clkt-uploading-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(139, 92, 246, 0.2);
+    border-top-color: #8b5cf6;
+    border-radius: 50%;
+    animation: clkt-spin 0.8s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+@keyframes clkt-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.clkt-current-version-status {
+    margin-top: 12px;
+    min-height: 20px;
+}
+
+.clkt-uploading-text {
+    color: #8b5cf6;
+    font-size: 12px;
+    font-weight: 500;
+}

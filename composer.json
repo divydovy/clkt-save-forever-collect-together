@@ -1,0 +1,33 @@
+{
+    "name": "clkt/clkt",
+    "description": "CLKT - Save Forever, Collect Together. Permanently preserve WordPress content on the Arweave decentralized web.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "David Lockie",
+            "homepage": "https://getclkt.com"
+        }
+    ],
+    "require": {
+        "php": "^7.4 || ^8.0",
+        "guzzlehttp/guzzle": "^7.9",
+        "phpseclib/phpseclib": "~2.0",
+        "web3p/web3.php": "0.3.2",
+        "iltumio/siwe-php": "^0.1",
+        "react/http": "^1.10",
+        "nesbot/carbon": "^2.72",
+        "ratchet/pawl": "^0.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "CLKT\\": "includes/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
