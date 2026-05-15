@@ -87,6 +87,8 @@ Arweave is a decentralized storage network that ensures data permanence. Once up
 
 A CLKT Record is the CLKT-specific data saved inside an atomic asset-compatible Arweave object. The atomic asset layer provides the permaweb envelope: durable data, tags, ownership, discoverability, and licensing hooks. The CLKT Record layer adds the product meaning: source URL, WordPress source data, collector wallet, attribution, content hashes, restore manifest, version history, collection context, and remix references.
 
+CLKT Records should align with the published Tradeable Atomic Asset spec: https://atomic-assets.arweave.net/. The base asset layer should use standard discoverability tags such as Content-Type, Type, Title, Description, and optional Topic tags, plus CLKT-specific tags such as App-Name, CLKT-Record-Version, Source-URL, Source-Domain, Collector, Collection-ID, and restore manifest references. SmartWeave contract tags and UDL license tags are the extension path for collectable, owner, and market behavior.
+
 In practice, a saved item should be one Arweave object, not two separate uploads. CLKT uses the atomic asset-compatible layer for interoperability and the CLKT Record payload for open collecting, attribution, restore proof, and trust.
 
 = Do I need cryptocurrency? =
