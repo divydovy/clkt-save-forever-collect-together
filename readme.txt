@@ -3,7 +3,7 @@ Contributors: davidlockie, divydovy
 Tags: arweave, backup, decentralized, web3, permanent-storage
 Requires at least: 5.8
 Tested up to: 6.9
-Stable tag: 1.0.19
+Stable tag: 1.0.21
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -19,6 +19,7 @@ CLKT connects your WordPress site to permanent, decentralized storage on Arweave
 * **One-Click Permanent Storage** - Save any post or page to the Arweave permaweb instantly
 * **Attachment Support** - Automatically includes images and media with your content
 * **Version History** - Every save creates a permanent snapshot you can always access
+* **Atomic Asset-Compatible Records** - Store CLKT-specific provenance, restore, and collection metadata inside permaweb-native asset objects
 * **Bulk Upload** - Save your entire content library in one go
 * **Self-Managed Wallet** - Connect your own Arweave wallet (Wander) for full control
 * **100% WordPress Compatible** - Works with any theme or plugin
@@ -81,6 +82,12 @@ This plugin relies on the following third-party services. Post content, media, a
 = What is Arweave? =
 
 Arweave is a decentralized storage network that ensures data permanence. Once uploaded, your content is replicated across hundreds of nodes worldwide and guaranteed to remain accessible forever.
+
+= What is a CLKT Record? =
+
+A CLKT Record is the CLKT-specific data saved inside an atomic asset-compatible Arweave object. The atomic asset layer provides the permaweb envelope: durable data, tags, ownership, discoverability, and licensing hooks. The CLKT Record layer adds the product meaning: source URL, WordPress source data, collector wallet, attribution, content hashes, restore manifest, version history, collection context, and remix references.
+
+In practice, a saved item should be one Arweave object, not two separate uploads. CLKT uses the atomic asset-compatible layer for interoperability and the CLKT Record payload for open collecting, attribution, restore proof, and trust.
 
 = Do I need cryptocurrency? =
 
@@ -157,12 +164,25 @@ Used to search and verify Arweave transactions. The plugin sends transaction IDs
 
 = 4. AO Testnet (su-router.ao-testnet.xyz) =
 
-Part of the Arweave ecosystem, used for atomic asset registration. When content is uploaded as an atomic asset, the plugin communicates with the AO network for registration.
+Part of the Arweave ecosystem, used for atomic asset registration. When content is uploaded as an atomic asset-compatible object, the plugin communicates with the AO network for registration.
 
 * [AO / Arweave Terms of Service](https://www.arweave.org/terms-of-service)
 * [AO / Arweave Privacy Policy](https://www.arweave.org/privacy)
 
 == Changelog ==
+
+= 1.0.21 =
+* Added Proof of Restore manifests for successful post uploads
+* Added verify/restore preview action for saved Permaweb versions
+* Added restore draft creation from saved upload manifests without overwriting the original post
+* Added E2E coverage for post plus media restore proof flow
+
+= 1.0.20 =
+* Consolidated auto-upload onto the pending-upload path to avoid duplicate attachment uploads and extra wallet signatures
+* Removed pre-public legacy upload, status, notice, migration, and compatibility paths
+* Removed old direct upload button wiring, enhanced-save script, and legacy Permaweb integration file
+* Verified one-post, one-attachment auto-upload at two upload/signature calls
+* Full E2E suite passing with 17 tests
 
 = 1.0.19 =
 * Fixed critical race condition in auto-upload system preventing re-uploads after editing published posts
@@ -218,6 +238,12 @@ Part of the Arweave ecosystem, used for atomic asset registration. When content 
 * Consolidated settings interface
 
 == Upgrade Notice ==
+
+= 1.0.21 =
+Adds Proof of Restore so saved Permaweb versions can be verified and reconstructed into a draft.
+
+= 1.0.20 =
+Consolidates auto-upload behavior and removes pre-public legacy paths. Fixes duplicate attachment upload/signature prompts for posts with media.
 
 = 1.0.19 =
 Critical fix for auto-upload race condition. Re-uploads after editing published posts now work correctly. Highly recommended update.
