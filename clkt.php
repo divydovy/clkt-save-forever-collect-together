@@ -401,6 +401,7 @@ require_once plugin_dir_path(__FILE__) . 'includes/admin/settings-page.php';
 // Legacy feedback feature removed - now using Google Forms (client-side only)
 require_once plugin_dir_path(__FILE__) . 'includes/permaweb-integration.php';
 require_once plugin_dir_path(__FILE__) . 'includes/frontend-display.php';
+require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
 
 // Add settings page
 function clkt_add_settings_page()
