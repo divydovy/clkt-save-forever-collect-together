@@ -4,7 +4,7 @@
  * Plugin Name: CLKT - Save Forever, Collect Together
  * Plugin URI: https://getclkt.com
  * Description: Your content deserves to outlive your website. CLKT permanently preserves your WordPress posts and media on the decentralized web. One click, saved forever. No recurring fees, no expiration dates.
- * Version: 1.0.19
+ * Version: 1.2.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: David Lockie
@@ -17,12 +17,95 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('CLKT_VERSION', '1.0.19');
+define('CLKT_VERSION', '1.2.0');
 define('CLKT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('CLKT_PLUGIN_URL', plugin_dir_url(__FILE__));
 
-// Handle auto-upload when post is published
-function clkt_handle_auto_upload($post_id, $post, $update)
+/**
+ * Return post types CLKT should expose on the authoring/public content surface.
+ *
+ * CLKT keeps attachments on the media upload path and leaves built-in pages opt-in
+ * via the filter. Public custom post types with editor support are included by
+ * default so editorial CPTs like photo archives can be collected.
+ *
+ * @return string[]
+ */
+function clkt_get_supported_post_types()
+{
+    $post_types = array('post');
+    $public_post_types = get_post_types(array('public' => true), 'objects');
+
+    foreach ($public_post_types as $post_type => $post_type_object) {
+        if ($post_type === 'post' || $post_type === 'attachment') {
+            continue;
+        }
+
+        if (!empty($post_type_object->_builtin)) {
+            continue;
+        }
+
+        if (!post_type_supports($post_type, 'editor')) {
+            continue;
+        }
+
+        $post_types[] = $post_type;
+    }
+
+    /**
+     * Filter the post types supported by CLKT.
+     *
+     * Return post type slugs. Include `page` here if pages should also expose
+     * CLKT controls on a site.
+     *
+     * @param string[] $post_types Supported post type slugs.
+     */
+    $post_types = apply_filters('clkt_supported_post_types', $post_types);
+    $post_types = array_map('sanitize_key', (array) $post_types);
+    $post_types = array_values(array_unique(array_filter($post_types)));
+
+    return !empty($post_types) ? $post_types : array('post');
+}
+
+/**
+ * Check whether CLKT supports a specific post type.
+ *
+ * @param string $post_type Post type slug.
+ * @return bool
+ */
+function clkt_is_supported_post_type($post_type)
+{
+    return in_array(sanitize_key((string) $post_type), clkt_get_supported_post_types(), true);
+}
+
+/**
+ * Get the current admin screen post type when available.
+ *
+ * @return string
+ */
+function clkt_get_current_admin_post_type()
+{
+    if (function_exists('get_current_screen')) {
+        $screen = get_current_screen();
+        if ($screen && !empty($screen->post_type)) {
+            return sanitize_key($screen->post_type);
+        }
+    }
+
+    global $post_type, $post;
+
+    if (!empty($post_type)) {
+        return sanitize_key($post_type);
+    }
+
+    if ($post && !empty($post->post_type)) {
+        return sanitize_key($post->post_type);
+    }
+
+    return '';
+}
+
+// Schedule auto-upload when a published post should be saved to Permaweb.
+function clkt_schedule_auto_upload($post_id, $post, $update)
 {
     // Skip if this is not a post save or if it's an autosave
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
@@ -34,8 +117,8 @@ function clkt_handle_auto_upload($post_id, $post, $update)
         return;
     }
 
-    // Skip if this is not a 'post' post type
-    if ($post->post_type !== 'post') {
+    // Skip unsupported post types.
+    if (!$post || !clkt_is_supported_post_type($post->post_type)) {
         return;
     }
 
@@ -66,59 +149,52 @@ function clkt_handle_auto_upload($post_id, $post, $update)
     // because we want to allow re-uploads when content changes (e.g., after editing).
     // The JavaScript UploadManager will handle deduplication by comparing content hashes.
 
-    // Set upload status to pending (will be handled by JavaScript via UploadManager)
-    update_post_meta($post_id, '_clkt_arweave_status', 'pending_auto_upload');
-
-    // Add admin notice for auto-upload
-    add_action('admin_notices', function () use ($post_id) {
-        ?>
-        <div class="notice notice-info clkt-auto-upload-notice" data-post-id="<?php echo esc_attr($post_id); ?>">
-            <p><strong>CLKT:</strong> Post published successfully. Upload will start automatically...</p>
-        </div>
-        <?php
-    });
-
-    // Enqueue auto-upload trigger script
-    add_action('admin_enqueue_scripts', function () use ($post_id) {
-        $auto_upload_js = '
-            jQuery(document).ready(function ($) {
-                var postId = $(".clkt-auto-upload-notice").data("post-id");
-                var notice = $(".clkt-auto-upload-notice");
-                if (!notice.length) return;
-
-                var checkInterval = setInterval(function () {
-                    if (window.ContentCloud && window.ContentCloud.singlePostContext) {
-                        clearInterval(checkInterval);
-                        console.log("Auto-upload triggered for post", postId);
-                        notice.find("p").html("<strong>CLKT:</strong> Uploading to Arweave... <span class=\"spinner is-active\" style=\"float:none;\"></span>");
-                        setTimeout(function() {
-                            window.ContentCloud.singlePostContext.startUpload({ autoUpload: true });
-                        }, 500);
-                    }
-                }, 200);
-
-                setTimeout(function () {
-                    clearInterval(checkInterval);
-                    if (!window.ContentCloud || !window.ContentCloud.singlePostContext) {
-                        notice.removeClass("notice-info").addClass("notice-warning");
-                        notice.find("p").html("<strong>CLKT:</strong> Auto-upload failed to initialize. Please manually upload from the CLKT panel below.");
-                    }
-                }, 10000);
-            });
-        ';
-        wp_register_script('clkt-auto-upload-trigger', false, array('jquery'), CLKT_VERSION, true);
-        wp_enqueue_script('clkt-auto-upload-trigger');
-        wp_add_inline_script('clkt-auto-upload-trigger', $auto_upload_js);
-    });
+    update_post_meta($post_id, '_clkt_pending_upload', array(
+        'timestamp' => time(),
+        'encrypt' => (bool) get_post_meta($post_id, '_clkt_encrypt_content', true),
+    ));
 }
 
-// Wrapper for REST API hook - adapts signature from ($post, $request, $creating) to ($post_id, $post, $update)
-function clkt_handle_auto_upload_rest($post, $request, $creating) {
-    clkt_handle_auto_upload($post->ID, $post, !$creating);
+function clkt_schedule_auto_upload_from_save_post($post_id, $post, $update)
+{
+    if (defined('REST_REQUEST') && REST_REQUEST) {
+        return;
+    }
+
+    clkt_schedule_auto_upload($post_id, $post, $update);
 }
 
-// Use rest_after_insert_post for Gutenberg compatibility - ensures post meta is available
-add_action('rest_after_insert_post', 'clkt_handle_auto_upload_rest', 10, 3);
+function clkt_schedule_auto_upload_rest($post, $request, $creating)
+{
+    clkt_schedule_auto_upload($post->ID, $post, !$creating);
+}
+
+add_action('save_post', 'clkt_schedule_auto_upload_from_save_post', 20, 3);
+
+function clkt_register_supported_post_type_hooks()
+{
+    static $registered_post_types = array();
+
+    foreach (clkt_get_supported_post_types() as $post_type) {
+        if (isset($registered_post_types[$post_type])) {
+            continue;
+        }
+
+        add_filter("manage_{$post_type}_posts_columns", 'clkt_add_posts_columns');
+        add_action("manage_{$post_type}_posts_custom_column", 'clkt_populate_posts_columns', 10, 2);
+        add_action("rest_after_insert_{$post_type}", 'clkt_schedule_auto_upload_rest', 10, 3);
+
+        if ($post_type === 'post') {
+            add_filter('manage_posts_columns', 'clkt_add_posts_columns');
+            add_action('manage_posts_custom_column', 'clkt_populate_posts_columns', 10, 2);
+        }
+
+        $registered_post_types[$post_type] = true;
+    }
+}
+add_action('init', 'clkt_register_supported_post_type_hooks', 100);
+add_action('admin_init', 'clkt_register_supported_post_type_hooks', 20);
+add_action('rest_api_init', 'clkt_register_supported_post_type_hooks', 20);
 
 // Add Permaweb status column to posts list
 function clkt_add_posts_columns($columns)
@@ -133,19 +209,14 @@ function clkt_add_posts_columns($columns)
     }
     return $new_columns;
 }
-add_filter('manage_posts_columns', 'clkt_add_posts_columns');
 
 // Populate the Permaweb status column
 function clkt_populate_posts_columns($column, $post_id)
 {
     if ($column === 'clkt_permaweb_status') {
-        $status = get_post_meta($post_id, '_clkt_arweave_status', true);
+        $pending_upload = get_post_meta($post_id, '_clkt_pending_upload', true);
 
-        // Check if post is currently uploading or pending
-        if ($status === 'uploading') {
-            echo '<span class="clkt-status-uploading">⏳ Uploading...</span>';
-            return;
-        } elseif ($status === 'pending_auto_upload') {
+        if (!empty($pending_upload)) {
             echo '<span class="clkt-status-pending">📤 Auto-upload</span>';
             return;
         }
@@ -193,7 +264,6 @@ function clkt_populate_posts_columns($column, $post_id)
         }
     }
 }
-add_action('manage_posts_custom_column', 'clkt_populate_posts_columns', 10, 2);
 
 // Add CSS for status indicators
 function clkt_admin_head_posts_list($hook)
@@ -202,11 +272,10 @@ function clkt_admin_head_posts_list($hook)
         return;
     }
     $screen = get_current_screen();
-    if ($screen && $screen->id === 'edit-post') {
+    if ($screen && !empty($screen->post_type) && clkt_is_supported_post_type($screen->post_type)) {
         $css = '
             .column-clkt_permaweb_status { width: 120px; }
             .clkt-status-uploaded { color: #46b450; font-weight: bold; }
-            .clkt-status-uploading { color: #ffb900; font-weight: bold; }
             .clkt-status-pending { color: #00a0d2; font-weight: bold; }
             .clkt-status-not-uploaded { color: #666; }
             .clkt-status-uploaded small { font-family: monospace; background: #f0f0f0; padding: 1px 3px; border-radius: 2px; }
@@ -233,26 +302,6 @@ function content_cloud_activate()
     // Create custom tables if needed
     require_once CLKT_PLUGIN_DIR . 'includes/class-clkt-activator.php';
     CLKT_Activator::activate();
-
-    // Cleanup legacy feedback database table (if exists)
-    clkt_cleanup_legacy_feedback_table();
-}
-
-/**
- * Remove legacy feedback table from database
- * Called on plugin activation to clean up old installations
- */
-function clkt_cleanup_legacy_feedback_table() {
-    global $wpdb;
-    $table_name = $wpdb->prefix . 'clkt_feedback';
-
-    // Check if table exists
-    $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$table_name}'");
-
-    if ($table_exists) {
-        // Drop the legacy table
-        $wpdb->query("DROP TABLE IF EXISTS {$table_name}");
-    }
 }
 register_activation_hook(__FILE__, 'content_cloud_activate');
 
@@ -267,13 +316,20 @@ function content_cloud_deactivate()
 }
 register_deactivation_hook(__FILE__, 'content_cloud_deactivate');
 
-function clkt_enqueue_scripts($hook)
+function clkt_enqueue_plugin_admin_assets($hook)
 {
-    // Only load on post edit screens, bulk upload page, and settings page
-    $allowed_pages = array('post.php', 'post-new.php', 'settings_page_clkt-settings', 'toplevel_page_clkt-bulk-upload');
+    // Only load on supported post edit screens, bulk upload page, and settings page.
+    $post_edit_pages = array('post.php', 'post-new.php');
+    $clkt_admin_pages = array('settings_page_clkt-settings', 'toplevel_page_clkt-bulk-upload');
+    $is_post_edit_page = in_array($hook, $post_edit_pages, true);
+    $is_clkt_admin_page = in_array($hook, $clkt_admin_pages, true);
 
     // Check if we're on an allowed page and user can edit posts
-    if (!current_user_can('edit_posts') || !in_array($hook, $allowed_pages)) {
+    if (!current_user_can('edit_posts') || (!$is_post_edit_page && !$is_clkt_admin_page)) {
+        return;
+    }
+
+    if ($is_post_edit_page && !clkt_is_supported_post_type(clkt_get_current_admin_post_type())) {
         return;
     }
 
@@ -300,19 +356,18 @@ function clkt_enqueue_scripts($hook)
     // Get current user info
     $current_user = wp_get_current_user();
 
-    // Only add full configuration on post edit pages
-    $is_post_edit_page = in_array($hook, $allowed_pages);
-
     // Localize script with AJAX URL, nonce, and user info
     // JavaScript global object for AJAX operations
     wp_localize_script('clkt-bundle', 'clkt_ajax_obj', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('clkt_ajax_nonce'),
             'plugin_url' => plugin_dir_url(__FILE__),
+            'version' => CLKT_VERSION,
 
             // Wallet configuration
-            'wallet_type' => 'self', // Default to self-managed wallet
-            'wallet_provider' => get_option('clkt_wallet_provider', 'wander'),
+            'wallet_type' => 'self', // Browser wallet mode.
+            'wallet_provider' => get_option('clkt_wallet_provider', 'evm'),
+            'x402_spend_cap_microusdc' => strval(max(0, absint(get_option('clkt_x402_spend_cap_microusdc', 100000)))),
 
             // Cost control settings
             'show_cost_estimate' => get_option('clkt_show_cost_estimate', '1'),
@@ -330,6 +385,7 @@ function clkt_enqueue_scripts($hook)
 
             // Test mode
             'test_mode' => get_option('clkt_test_mode', false) ? true : false,
+            'debug' => defined('WP_DEBUG') && WP_DEBUG && current_user_can('manage_options'),
 
             'user' => array(
                 'id' => $current_user->ID,
@@ -342,12 +398,18 @@ function clkt_enqueue_scripts($hook)
     wp_add_inline_script('clkt-bundle', '
         // Ensure proper initialization order
         document.addEventListener("DOMContentLoaded", function() {
+            var clktDebugLog = function() {
+                if (window.clkt_ajax_obj && window.clkt_ajax_obj.debug) {
+                    console.log.apply(console, arguments);
+                }
+            };
+
             // Diagnostic information
-            console.log("CLKT - Security Context Check:");
-            console.log("- Is Secure Context:", window.isSecureContext);
-            console.log("- Protocol:", window.location.protocol);
-            console.log("- Crypto Object:", typeof window.crypto !== "undefined");
-            console.log("- Subtle Crypto:", window.crypto && typeof window.crypto.subtle !== "undefined");
+            clktDebugLog("CLKT - Security Context Check:");
+            clktDebugLog("- Is Secure Context:", window.isSecureContext);
+            clktDebugLog("- Protocol:", window.location.protocol);
+            clktDebugLog("- Crypto Object:", typeof window.crypto !== "undefined");
+            clktDebugLog("- Subtle Crypto:", window.crypto && typeof window.crypto.subtle !== "undefined");
 
             // Check WebCrypto availability
             function checkWebCrypto() {
@@ -359,7 +421,7 @@ function clkt_enqueue_scripts($hook)
                     }
 
                     if (window.crypto && window.crypto.subtle) {
-                        console.log("Native WebCrypto is available");
+                        clktDebugLog("Native WebCrypto is available");
                         return true;
                     }
 
@@ -398,7 +460,6 @@ function clkt_enqueue_scripts($hook)
 
 // Include the consolidated settings page
 require_once plugin_dir_path(__FILE__) . 'includes/admin/settings-page.php';
-// Legacy feedback feature removed - now using Google Forms (client-side only)
 require_once plugin_dir_path(__FILE__) . 'includes/permaweb-integration.php';
 require_once plugin_dir_path(__FILE__) . 'includes/frontend-display.php';
 require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
@@ -415,7 +476,6 @@ function clkt_add_settings_page()
         'clkt_render_consolidated_settings_page'  // Use new consolidated page
     );
 
-    // Legacy feedback feature removed - now using Google Forms (client-side only)
 }
 add_action('admin_menu', 'clkt_add_settings_page');
 
@@ -478,6 +538,22 @@ function clkt_register_settings()
         'sanitize_callback' => 'rest_sanitize_boolean'
     ));
 
+    register_setting('clkt_settings', 'clkt_wallet_provider', array(
+        'type' => 'string',
+        'description' => 'Browser wallet provider for uploads',
+        'default' => 'evm',
+        'sanitize_callback' => function ($value) {
+            return in_array($value, array('evm', 'wander'), true) ? $value : 'evm';
+        }
+    ));
+
+    register_setting('clkt_settings', 'clkt_x402_spend_cap_microusdc', array(
+        'type' => 'integer',
+        'description' => 'Maximum Base USDC spend per Turbo x402 upload, denominated in microUSDC',
+        'default' => 100000,
+        'sanitize_callback' => 'absint'
+    ));
+
     register_setting('clkt_settings', 'clkt_show_powered_by', array(
         'type' => 'string',
         'description' => 'Show Powered by CLKT credit link on public posts',
@@ -498,6 +574,46 @@ function clkt_get_nonce()
 }
 add_action('wp_ajax_clkt_get_nonce', 'clkt_get_nonce');
 add_action('wp_ajax_nopriv_clkt_get_nonce', 'clkt_get_nonce');
+
+/**
+ * Save the latest public CLKT identity-link transaction for this site.
+ */
+function clkt_save_identity_link()
+{
+    check_ajax_referer('clkt_ajax_nonce', 'nonce');
+
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    $tx_id = isset($_POST['tx_id']) ? sanitize_text_field(wp_unslash($_POST['tx_id'])) : '';
+    $evm_address = isset($_POST['evm_address']) ? sanitize_text_field(wp_unslash($_POST['evm_address'])) : '';
+    $arweave_address = isset($_POST['arweave_address']) ? sanitize_text_field(wp_unslash($_POST['arweave_address'])) : '';
+    $record_json = isset($_POST['record']) ? wp_unslash($_POST['record']) : '';
+
+    if (empty($tx_id) || empty($evm_address) || empty($arweave_address)) {
+        wp_send_json_error('Missing identity link fields');
+        return;
+    }
+
+    $record = json_decode($record_json, true);
+
+    update_option('clkt_identity_link', array(
+        'tx_id' => $tx_id,
+        'evm_address' => $evm_address,
+        'arweave_address' => $arweave_address,
+        'record' => is_array($record) ? $record : null,
+        'updated_at' => current_time('mysql', true),
+    ));
+
+    wp_send_json_success(array(
+        'tx_id' => $tx_id,
+        'evm_address' => $evm_address,
+        'arweave_address' => $arweave_address,
+    ));
+}
+add_action('wp_ajax_clkt_save_identity_link', 'clkt_save_identity_link');
 
 /**
  * Securely retrieve global encryption password
@@ -964,14 +1080,38 @@ function clkt_format_post_data($post)
         'status'         => $post->post_status,
         'type'           => $post->post_type,
         'link'           => get_permalink($post_id),
-        'title'          => array('rendered' => get_the_title($post_id)),
-        'content'        => array('rendered' => apply_filters('the_content', $post->post_content)),
-        'excerpt'        => array('rendered' => has_excerpt($post_id) ? apply_filters('the_excerpt', $post->post_excerpt) : ''),
+        'title'          => array('rendered' => get_the_title($post_id), 'raw' => $post->post_title),
+        'content'        => array('rendered' => apply_filters('the_content', $post->post_content), 'raw' => $post->post_content),
+        'excerpt'        => array('rendered' => has_excerpt($post_id) ? apply_filters('the_excerpt', $post->post_excerpt) : '', 'raw' => $post->post_excerpt),
         'author'         => (int) $post->post_author,
         'featured_media' => (int) get_post_thumbnail_id($post_id),
         'categories'     => wp_get_post_categories($post_id),
         'tags'           => wp_get_post_tags($post_id, array('fields' => 'ids')),
+        'meta'           => clkt_get_post_meta_for_upload($post_id),
     );
+}
+
+function clkt_get_post_meta_for_upload($post_id)
+{
+    $meta = array(
+        '_clkt_arweave_versions' => get_post_meta($post_id, '_clkt_arweave_versions', true),
+        '_clkt_current_tx_id'    => get_post_meta($post_id, '_clkt_current_tx_id', true),
+        '_clkt_encrypt_content'  => get_post_meta($post_id, '_clkt_encrypt_content', true),
+        '_clkt_encryption_method' => get_post_meta($post_id, '_clkt_encryption_method', true),
+        '_clkt_per_post_password' => get_post_meta($post_id, '_clkt_per_post_password', true),
+    );
+
+    $license = get_post_meta($post_id, '_clkt_license', true);
+    if (!empty($license) && is_array($license)) {
+        $meta['_clkt_license'] = array_intersect_key($license, array_flip(array('spdx', 'url', 'note')));
+    }
+
+    $derived_from = get_post_meta($post_id, '_clkt_derived_from', true);
+    if (!empty($derived_from) && is_array($derived_from)) {
+        $meta['_clkt_derived_from'] = $derived_from;
+    }
+
+    return $meta;
 }
 
 /**
@@ -1017,7 +1157,7 @@ function clkt_preview_bulk_upload()
 
     // Build query args
     $query_args = array(
-        'post_type' => 'post',
+        'post_type' => clkt_get_supported_post_types(),
         'post_status' => 'publish',
         'posts_per_page' => -1,
         'orderby' => 'date',
@@ -1276,7 +1416,8 @@ function clkt_preview_bulk_upload()
                 }
 
                 $result['posts'][] = array(
-                    'type' => 'post',
+                    'type' => $post->post_type,
+                    'type_label' => get_post_type_object($post->post_type) ? get_post_type_object($post->post_type)->labels->singular_name : $post->post_type,
                     'id' => $post->ID,
                     'title' => $title,
                     'date' => $post->post_date,
@@ -1448,7 +1589,7 @@ function clkt_preview_bulk_upload()
 
     // Quick count of posts with/without versions
     $all_posts_check = get_posts(array(
-        'post_type' => 'post',
+        'post_type' => clkt_get_supported_post_types(),
         'post_status' => 'publish',
         'posts_per_page' => -1,
         'fields' => 'ids'
@@ -1536,219 +1677,6 @@ function clkt_add_test_version()
 }
 
 
-/**
- * Handle single post upload in bulk process
- */
-function clkt_bulk_upload_single()
-{
-    if (!wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['nonce'])), 'clkt_bulk_upload')) {
-        wp_send_json_error('Invalid nonce');
-    }
-
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('Insufficient permissions');
-    }
-
-    $post_id = intval($_POST['post_id']);
-    $encrypt = sanitize_text_field(wp_unslash($_POST['encrypt'])) === 'true';
-
-    try {
-        // Get post data using direct approach
-        $post = get_post($post_id);
-        if (!$post) {
-            throw new Exception('Post not found');
-        }
-
-        // Self-managed wallet - prepare data for client-side upload
-
-        // Get post content
-        $post_content = apply_filters('the_content', $post->post_content);
-
-        // Get attachments if needed
-        $attachments = array();
-        if (get_option('clkt_include_attachments', '0') === '1') {
-            $attachment_ids = get_posts(array(
-                'post_type' => 'attachment',
-                'posts_per_page' => -1,
-                'post_parent' => $post_id,
-                'fields' => 'ids'
-            ));
-
-            foreach ($attachment_ids as $attachment_id) {
-                $attachments[] = array(
-                    'id' => $attachment_id,
-                    'url' => wp_get_attachment_url($attachment_id),
-                    'type' => get_post_mime_type($attachment_id),
-                    'title' => get_the_title($attachment_id)
-                );
-            }
-        }
-
-        // Get full attachment data using the same function as single post upload
-        $clkt_attachments = clkt_get_post_attachments($post_id);
-
-        // Get category and tag details for proper metadata
-        $categories = get_the_category($post_id);
-        $tags = get_the_tags($post_id);
-
-        // Build embedded data for categories and tags
-        $embedded_data = array();
-        if ($categories) {
-            $embedded_data['wp:term'] = array(
-                array_map(function ($cat) {
-                    return array(
-                        'id' => $cat->term_id,
-                        'name' => $cat->name,
-                        'slug' => $cat->slug,
-                        'taxonomy' => 'category'
-                    );
-                }, $categories)
-            );
-        }
-
-        if ($tags) {
-            if (!isset($embedded_data['wp:term'])) {
-                $embedded_data['wp:term'] = array();
-            }
-            $tag_data = array_map(function ($tag) {
-                return array(
-                    'id' => $tag->term_id,
-                    'name' => $tag->name,
-                    'slug' => $tag->slug,
-                    'taxonomy' => 'post_tag'
-                );
-            }, $tags);
-
-            // Merge tags with categories
-            if (!empty($embedded_data['wp:term'][0])) {
-                $embedded_data['wp:term'][] = $tag_data;
-            } else {
-                $embedded_data['wp:term'] = array($tag_data);
-            }
-        }
-
-        // Build comprehensive post data matching the format of single post uploads
-        $post_data = array(
-            'id' => $post_id,
-            'title' => array('rendered' => get_the_title($post_id)),
-            'content' => array('rendered' => $post_content),
-            'excerpt' => array('rendered' => get_the_excerpt($post_id)),
-            'author' => $post->post_author,
-            'date' => $post->post_date,
-            'modified' => $post->post_modified,
-            'slug' => $post->post_name,
-            'status' => $post->post_status,
-            'type' => $post->post_type,
-            'link' => get_permalink($post_id),
-            'categories' => wp_get_post_categories($post_id),
-            'tags' => wp_get_post_tags($post_id, array('fields' => 'ids')),
-            'featured_media' => get_post_thumbnail_id($post_id),
-            'clkt_attachments' => $clkt_attachments,  // Use the full attachment data
-            '_embedded' => $embedded_data
-        );
-
-        // Return post data for client-side upload
-        wp_send_json_success(array(
-            'wallet_type' => 'self',
-            'post_data' => $post_data,  // Full post data for createPostAsset
-            'encrypt' => $encrypt,
-            'message' => 'Post data prepared for self-managed wallet upload',
-            // Keep backward compatibility fields
-            'post_id' => $post_id,
-            'post_title' => get_the_title($post_id),
-            'post_content' => $post_content,
-            'post_url' => get_permalink($post_id),
-            'post_date' => $post->post_date,
-            'post_author' => get_the_author_meta('display_name', $post->post_author),
-            'attachments' => $attachments  // Keep simple format for backward compatibility
-        ));
-
-    } catch (Exception $e) {
-        wp_send_json_error($e->getMessage());
-    }
-}
-add_action('wp_ajax_clkt_bulk_upload_single', 'clkt_bulk_upload_single');
-
-
-/**
- * Handle auto-upload when post is published/updated
- */
-function clkt_auto_upload_on_publish($post_id, $post, $update)
-{
-    // Only for published posts
-    if ($post->post_status !== 'publish') {
-        return;
-    }
-
-    // Only for regular posts (not attachments, pages, etc.)
-    if ($post->post_type !== 'post') {
-        return;
-    }
-
-    // Check if auto-upload is enabled for this post
-    $auto_upload = get_post_meta($post_id, '_clkt_publish_and_upload', true);
-    if (!$auto_upload) {
-        return;
-    }
-
-    // Check if encryption is enabled for this post
-    $encrypt_content = get_post_meta($post_id, '_clkt_encrypt_content', true);
-
-    // Schedule the upload for next page load (since we can't do Arweave upload server-side easily)
-    update_post_meta($post_id, '_clkt_pending_upload', array(
-        'timestamp' => time(),
-        'encrypt' => $encrypt_content ? true : false
-    ));
-
-    // Add admin notice for next page load
-    set_transient('clkt_upload_notice_' . get_current_user_id(), array(
-        'type' => 'info',
-        'message' => 'Post "' . $post->post_title . '" will be uploaded to Permaweb automatically.'
-    ), 60);
-}
-
-// Wrapper for REST API hook - adapts signature from ($post, $request, $creating) to ($post_id, $post, $update)
-function clkt_auto_upload_on_publish_rest($post, $request, $creating) {
-    clkt_auto_upload_on_publish($post->ID, $post, !$creating);
-}
-
-// Use rest_after_insert_post for Gutenberg compatibility - ensures post meta is available
-add_action('rest_after_insert_post', 'clkt_auto_upload_on_publish_rest', 10, 3);
-
-/**
- * Save meta box data including auto-upload preference
- */
-function clkt_save_meta_box_data($post_id)
-{
-    // Check nonce
-    if (!isset($_POST['clkt_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['clkt_nonce'])), 'clkt_meta_box')) {
-        return;
-    }
-
-    // Check user capabilities
-    if (!current_user_can('edit_post', $post_id)) {
-        return;
-    }
-
-    // Save auto-upload preference
-    if (isset($_POST['clkt_publish_and_upload'])) {
-        update_post_meta($post_id, '_clkt_publish_and_upload', 1);
-    } else {
-        delete_post_meta($post_id, '_clkt_publish_and_upload');
-    }
-
-    // Note: Encryption preferences are now handled by AJAX in clkt_save_encryption_settings()
-    // Only save encryption preference if it's explicitly in the POST data to avoid conflicts
-    if (isset($_POST['clkt_encrypt_content'])) {
-        update_post_meta($post_id, '_clkt_encrypt_content', 1);
-    } elseif (array_key_exists('clkt_encrypt_content', $_POST)) {
-        // Only delete if the key exists but is not set (unchecked checkbox)
-        delete_post_meta($post_id, '_clkt_encrypt_content');
-    }
-    // If clkt_encrypt_content is not in POST at all, don't touch the meta field
-}
-add_action('save_post', 'clkt_save_meta_box_data');
-
 // AJAX handler for saving per-post settings from the dropdown
 add_action('wp_ajax_clkt_save_per_post_setting', 'clkt_save_per_post_setting');
 add_action('wp_ajax_clkt_save_encryption_settings', 'clkt_save_encryption_settings');
@@ -1794,6 +1722,79 @@ function clkt_save_encryption_settings()
     // 2. NOT store truly sensitive data that requires password encryption
     // Future: Implement client-side-only password storage (localStorage) or prompt-based entry
     update_post_meta($post_id, '_clkt_per_post_password', $per_post_password);
+
+    wp_send_json_success();
+}
+
+add_action('wp_ajax_clkt_save_attribution', 'clkt_save_attribution');
+function clkt_save_attribution()
+{
+    check_ajax_referer('clkt_ajax_nonce', 'nonce');
+
+    if (!isset($_POST['post_id'])) {
+        wp_send_json_error('Missing post_id');
+        return;
+    }
+    $post_id = intval($_POST['post_id']);
+    if (!current_user_can('edit_post', $post_id)) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    $license_spdx = isset($_POST['license_spdx']) ? sanitize_text_field(wp_unslash($_POST['license_spdx'])) : '';
+    $license_url = isset($_POST['license_url']) ? esc_url_raw(wp_unslash($_POST['license_url'])) : '';
+    $license_note = isset($_POST['license_note']) ? sanitize_text_field(wp_unslash($_POST['license_note'])) : '';
+
+    if (!empty($license_spdx)) {
+        $license = array('spdx' => $license_spdx);
+        if (!empty($license_url)) {
+            $license['url'] = $license_url;
+        }
+        if (!empty($license_note)) {
+            $license['note'] = $license_note;
+        }
+        update_post_meta($post_id, '_clkt_license', $license);
+    } else {
+        delete_post_meta($post_id, '_clkt_license');
+    }
+
+    $derived_from_json = isset($_POST['derived_from']) ? sanitize_text_field(wp_unslash($_POST['derived_from'])) : '[]';
+    $derived_from = json_decode($derived_from_json, true);
+
+    if (is_array($derived_from) && !empty($derived_from)) {
+        $sanitized = array();
+        $allowed_relationships = array('citation', 'response', 'translation', 'remix', 'fork');
+        foreach ($derived_from as $ref) {
+            if (!is_array($ref) || empty($ref['relationship'])) {
+                continue;
+            }
+            $relationship = sanitize_text_field($ref['relationship']);
+            if (!in_array($relationship, $allowed_relationships)) {
+                continue;
+            }
+            $entry = array('relationship' => $relationship);
+            if (!empty($ref['title'])) {
+                $entry['title'] = sanitize_text_field($ref['title']);
+            }
+            if (!empty($ref['author'])) {
+                $entry['author'] = sanitize_text_field($ref['author']);
+            }
+            if (!empty($ref['url'])) {
+                $entry['url'] = esc_url_raw($ref['url']);
+            }
+            if (!empty($ref['txId'])) {
+                $entry['txId'] = sanitize_text_field($ref['txId']);
+            }
+            $sanitized[] = $entry;
+        }
+        if (!empty($sanitized)) {
+            update_post_meta($post_id, '_clkt_derived_from', $sanitized);
+        } else {
+            delete_post_meta($post_id, '_clkt_derived_from');
+        }
+    } else {
+        delete_post_meta($post_id, '_clkt_derived_from');
+    }
 
     wp_send_json_success();
 }
@@ -1878,8 +1879,7 @@ function clkt_preview_single_post()
         if ($latest_valid_version) {
             // Only check if latest valid version has a content_hash
             if (isset($latest_valid_version['content_hash']) && !empty($latest_valid_version['content_hash'])) {
-                // Use the new helper function that tries multiple hash calculation methods
-                if (clkt_post_hash_matches($post, $latest_valid_version['content_hash'])) {
+                if ($current_hash === $latest_valid_version['content_hash']) {
                     $post_already_uploaded = true;
                 }
             }
@@ -1937,7 +1937,8 @@ function clkt_preview_single_post()
     $max_free_size_bytes = $max_free_size_kb * 1024;
 
     $post_data = array(
-        'type' => 'post',
+        'type' => $post->post_type,
+        'type_label' => get_post_type_object($post->post_type) ? get_post_type_object($post->post_type)->labels->singular_name : $post->post_type,
         'id' => $post->ID,
         'title' => get_the_title($post_id),
         'date' => $post->post_date,
@@ -2056,53 +2057,6 @@ function clkt_preview_single_post()
     wp_send_json_success($response_data);
 }
 
-// AJAX handler for updating post preferences from Gutenberg
-add_action('wp_ajax_clkt_update_post_preference', 'clkt_update_post_preference');
-function clkt_update_post_preference()
-{
-    check_ajax_referer('clkt_ajax_nonce', 'nonce');
-
-    $post_id = intval($_POST['post_id']);
-
-    if (!current_user_can('edit_post', $post_id)) {
-        wp_send_json_error('Insufficient permissions');
-        return;
-    }
-
-    if (isset($_POST['auto_upload'])) {
-        $value = sanitize_text_field(wp_unslash($_POST['auto_upload']));
-
-        // Update the per-post save setting
-        if ($value === '1' || $value == 1) {
-            update_post_meta($post_id, '_clkt_per_post_save', 'always');
-        } elseif ($value === '0' || $value == 0) {
-            update_post_meta($post_id, '_clkt_per_post_save', 'never');
-        } else {
-            // null or 'default' - set to default to use global setting
-            update_post_meta($post_id, '_clkt_per_post_save', 'default');
-        }
-
-        // Also update the old meta for backward compatibility
-        if ($value === '1' || $value == 1) {
-            update_post_meta($post_id, '_clkt_publish_and_upload', '1');
-        } elseif ($value === '0' || $value == 0) {
-            update_post_meta($post_id, '_clkt_publish_and_upload', '0');
-        } else {
-            delete_post_meta($post_id, '_clkt_publish_and_upload');
-        }
-    }
-
-    if (isset($_POST['encrypt'])) {
-        if (sanitize_text_field(wp_unslash($_POST['encrypt']))) {
-            update_post_meta($post_id, '_clkt_encrypt_content', 1);
-        } else {
-            delete_post_meta($post_id, '_clkt_encrypt_content');
-        }
-    }
-
-    wp_send_json_success();
-}
-
 // AJAX handler for saving upload mode
 add_action('wp_ajax_clkt_save_upload_mode', 'clkt_save_upload_mode');
 function clkt_save_upload_mode()
@@ -2129,46 +2083,13 @@ function clkt_save_upload_mode()
     ));
 }
 
-// Add enhanced save functionality integration
-add_action('post_submitbox_misc_actions', 'clkt_add_publish_save_options', 10);  // Classic editor
-add_action('admin_enqueue_scripts', 'clkt_enhanced_save_script', 10);             // Classic editor JS
-
 // For Gutenberg/Block Editor
 // Disabled the inline panel since we have the proper meta box
 // add_action('enqueue_block_editor_assets', 'clkt_gutenberg_editor_assets');
 add_action('enqueue_block_editor_assets', 'clkt_enqueue_gutenberg_integration');
 
-// Also add to pages and other post types for testing
-add_action('page_submitbox_misc_actions', 'clkt_add_publish_save_options', 1);
-
 // Ensure WordPress meta box functionality
 add_action('admin_enqueue_scripts', 'clkt_enqueue_admin_scripts');
-
-// Register meta fields for Gutenberg
-add_action('init', 'clkt_register_post_meta');
-
-function clkt_register_post_meta()
-{
-    register_post_meta('post', 'clkt_auto_upload', array(
-        'show_in_rest' => true,
-        'single' => true,
-        'type' => 'string',
-        'default' => '0',
-        'auth_callback' => function () {
-            return current_user_can('edit_posts');
-        }
-    ));
-
-    register_post_meta('post', '_clkt_publish_and_upload', array(
-        'show_in_rest' => true,
-        'single' => true,
-        'type' => 'boolean',
-        'default' => false,
-        'auth_callback' => function () {
-            return current_user_can('edit_posts');
-        }
-    ));
-}
 
 // Removed debug admin notices - Gutenberg integration is working
 
@@ -2177,15 +2098,12 @@ function clkt_register_post_meta()
  */
 function clkt_enqueue_admin_scripts($hook)
 {
-    global $post_type;
-
     // Only load on post edit screens
     if (!in_array($hook, ['post.php', 'post-new.php'])) {
         return;
     }
 
-    // Only for post post_type
-    if ($post_type !== 'post') {
+    if (!clkt_is_supported_post_type(clkt_get_current_admin_post_type())) {
         return;
     }
 
@@ -2205,19 +2123,6 @@ function clkt_enqueue_admin_scripts($hook)
         });
     ');
 
-    // Publish box save options styles (used by clkt_add_publish_save_options)
-    $publish_box_css = '
-        .misc-pub-clkt .clkt-wallet-indicator { display: flex; align-items: center; font-size: 13px; }
-        .misc-pub-clkt .clkt-indicator-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background-color: #ddd; }
-        .misc-pub-clkt .clkt-indicator-dot.connected { background-color: #46b450; }
-        .misc-pub-clkt .clkt-indicator-dot.disconnected { background-color: #dc3232; }
-        .misc-pub-clkt .clkt-save-options { border-top: 1px solid #ddd; padding-top: 8px; }
-        .misc-pub-clkt .clkt-advanced-options { font-size: 12px; color: #666; }
-        .misc-pub-clkt label { cursor: pointer; }
-    ';
-    wp_register_style('clkt-publish-box', false, array(), CLKT_VERSION);
-    wp_enqueue_style('clkt-publish-box');
-    wp_add_inline_style('clkt-publish-box', $publish_box_css);
 }
 
 /**
@@ -2230,8 +2135,8 @@ function clkt_enqueue_gutenberg_integration()
 {
     global $post;
 
-    // Only load on post edit screens
-    if (!$post || $post->post_type !== 'post') {
+    // Only load on supported post edit screens.
+    if (!$post || !clkt_is_supported_post_type($post->post_type)) {
         return;
     }
 
@@ -2248,103 +2153,13 @@ function clkt_enqueue_gutenberg_integration()
     wp_localize_script('clkt-gutenberg-integration', 'clkt_ajax_obj', array(
         'ajax_url' => admin_url('admin-ajax.php'),
         'nonce' => wp_create_nonce('clkt_ajax_nonce'),
+        'debug' => defined('WP_DEBUG') && WP_DEBUG && current_user_can('manage_options'),
 
         'global_auto_save' => get_option('clkt_global_auto_save', false) ? '1' : '0',
         'global_encryption_password' => get_option('clkt_global_encryption_password', '')
     ));
 }
 
-
-/**
- * Add enhanced save options to the publish box
- */
-function clkt_add_publish_save_options()
-{
-    global $post;
-
-    if (!$post || $post->post_type !== 'post') {
-        return;
-    }
-
-    // Get current settings
-    $auto_upload = get_post_meta($post->ID, '_clkt_publish_and_upload', true);
-    $global_auto = get_option('clkt_global_auto_save', false);
-    $encrypt = get_post_meta($post->ID, '_clkt_encrypt_content', true);
-
-    // Add nonce field
-    wp_nonce_field('clkt_meta_box', 'clkt_nonce');
-
-    ?>
-    <div class="misc-pub-section misc-pub-clkt">
-        <span id="clkt-save-status">
-            <span class="clkt-wallet-indicator">
-                <span class="clkt-indicator-dot" id="clkt-wallet-dot"></span>
-                <span id="clkt-wallet-text">Checking wallet...</span>
-            </span>
-        </span>
-
-        <div class="clkt-save-options" style="margin-top: 8px;">
-            <label>
-                <input type="checkbox" name="clkt_publish_and_upload" id="clkt_publish_and_upload" value="1" <?php checked($auto_upload || $global_auto); ?> />
-                Save to Permaweb automatically
-            </label>
-
-            <div class="clkt-advanced-options" style="margin-left: 20px; margin-top: 5px;">
-                <label>
-                    <input type="checkbox" name="clkt_encrypt_content" id="clkt_encrypt_content" value="1" <?php checked($encrypt); ?> />
-                    Encrypt content
-                </label>
-            </div>
-        </div>
-    </div>
-    <?php
-}
-
-/**
- * Add enhanced save script for wallet integration
- */
-function clkt_enhanced_save_script($hook)
-{
-    // Only for post edit screens
-    if (!in_array($hook, array('post.php', 'post-new.php'))) {
-        return;
-    }
-
-    global $post;
-
-    // Only for Classic Editor (not Gutenberg) on post type 'post'
-    if (!$post || $post->post_type !== 'post') {
-        return;
-    }
-
-    wp_enqueue_script(
-        'clkt-enhanced-save',
-        plugins_url('assets/js/enhanced-save.js', __FILE__),
-        array('jquery'),
-        CLKT_VERSION,
-        true
-    );
-}
-
-/**
- * Show admin notices for pending uploads
- */
-function clkt_show_upload_notices()
-{
-    $user_id = get_current_user_id();
-    $notice = get_transient('clkt_upload_notice_' . $user_id);
-
-    if ($notice) {
-        echo '<div class="notice notice-' . esc_attr($notice['type']) . ' is-dismissible">';
-        echo '<p><strong>CLKT:</strong> ' . esc_html($notice['message']) . '</p>';
-        echo '</div>';
-
-        delete_transient('clkt_upload_notice_' . $user_id);
-    }
-}
-add_action('admin_notices', 'clkt_show_upload_notices');
-
-// Removed duplicate function - see line 1939 for clkt_check_pending_upload
 
 /**
  * Clear pending upload after successful upload
@@ -2359,9 +2174,7 @@ function clkt_clear_pending_upload()
         return;
     }
 
-    // Clear both meta fields used for pending uploads
     delete_post_meta($post_id, '_clkt_pending_upload');
-    delete_post_meta($post_id, '_clkt_arweave_status');
 
     wp_send_json_success();
 }
@@ -2386,57 +2199,6 @@ function clkt_calculate_post_content_hash($post)
     $hash = hash('sha256', $json_string);
 
     return $hash;
-}
-
-/**
- * Calculate legacy content hash (for backward compatibility with older versions)
- * Older versions included 'modified' timestamp in the hash
- *
- * @param WP_Post $post The WordPress post object
- * @return string SHA-256 hash of the legacy post content
- */
-function clkt_calculate_legacy_post_content_hash($post)
-{
-    $hash_data = array(
-        'id' => $post->ID,
-        'title' => $post->post_title,
-        'content' => $post->post_content,
-        'excerpt' => $post->post_excerpt,
-        'modified' => $post->post_modified
-    );
-
-    $json_string = json_encode($hash_data, JSON_UNESCAPED_UNICODE);
-    $hash = hash('sha256', $json_string);
-
-    return $hash;
-}
-
-/**
- * Check if post content matches a stored version hash
- * Tries both current and legacy hash calculation methods
- *
- * @param WP_Post $post The WordPress post object
- * @param string $stored_hash The hash stored in version metadata
- * @return bool True if hashes match (using any method)
- */
-function clkt_post_hash_matches($post, $stored_hash)
-{
-    // Try current hash method first
-    $current_hash = clkt_calculate_post_content_hash($post);
-    if ($current_hash === $stored_hash) {
-        return true;
-    }
-
-    // Try legacy hash method (includes 'modified' field)
-    $legacy_hash = clkt_calculate_legacy_post_content_hash($post);
-    if ($legacy_hash === $stored_hash) {
-        return true;
-    }
-
-    // Note: Removed third hash method that called clkt_get_post_data()
-    // because it's an AJAX handler that exits the script - caused preview to break
-
-    return false;
 }
 
 /**
@@ -2903,8 +2665,6 @@ function clkt_save_transaction()
     // Update current status - simple TX ID presence indicates uploaded
     update_post_meta($post_id, '_clkt_current_tx_id', $tx_id);
 
-    // Legacy fields removed
-    update_post_meta($post_id, '_clkt_arweave_status', 'uploaded');
     if (!empty($tags)) {
         update_post_meta($post_id, '_clkt_arweave_tags', $tags);
     }
@@ -2980,8 +2740,6 @@ function clkt_save_bulk_transaction()
     // Update current status - this is the critical missing piece!
     update_post_meta($post_id, '_clkt_current_tx_id', $tx_id);
 
-    // Legacy fields removed
-    update_post_meta($post_id, '_clkt_arweave_status', 'uploaded');
     update_post_meta($post_id, '_clkt_upload_timestamp', time());
 
     // Also save URL for convenience
@@ -3011,39 +2769,13 @@ function clkt_get_versions()
         wp_send_json_error(array('message' => 'You do not have permission to view this post'));
         return;
     }
-    // Check new meta key first
     $versions = get_post_meta($post_id, '_clkt_arweave_versions', true);
-
-    // If no versions found, check old meta key
-    if (empty($versions)) {
-        $versions = get_post_meta($post_id, '_cc_arweave_versions', true);
-    }
-
-    // Also check if there's a single transaction saved (legacy format)
-    if (empty($versions)) {
-        $tx_id = get_post_meta($post_id, '_clkt_current_tx_id', true); // Use new meta key
-        if (!$tx_id) {
-            $tx_id = get_post_meta($post_id, '_cc_arweave_tx_id', true);
-        }
-
-        if ($tx_id) {
-            // Create a version entry from legacy single transaction
-            $versions = array(
-                array(
-                    'id' => $tx_id,
-                    'tx_id' => $tx_id,
-                    'arweave_url' => 'https://arweave.net/' . $tx_id,
-                    'timestamp' => get_post_meta($post_id, '_clkt_upload_timestamp', true) ?: time()
-                )
-            );
-        }
-    }
 
     if (!is_array($versions)) {
         $versions = array();
     }
 
-    // Fix missing 'id' field in older versions by extracting from arweave_url
+    // Normalize entries created by different current upload handlers.
     // Also filter out invalid tx_ids
     if (!empty($versions)) {
         $clean_versions = array();
@@ -3095,7 +2827,6 @@ function clkt_debug_meta()
     $meta_keys = array(
         '_clkt_arweave_versions',
         '_clkt_current_tx_id',
-        '_clkt_arweave_status',
         '_clkt_arweave_url',
         '_clkt_arweave_block_height',
         '_clkt_arweave_tags',
@@ -3120,6 +2851,37 @@ function clkt_debug_meta()
 }
 add_action('wp_ajax_clkt_debug_meta', 'clkt_debug_meta');
 
+function clkt_render_restore_proof_button($post_id, $tx_id)
+{
+    if (empty($tx_id) || $tx_id === '[object Object]') {
+        return '';
+    }
+
+    return '<button type="button" class="button-link clkt-restore-proof-button" data-post-id="' . esc_attr($post_id) . '" data-tx-id="' . esc_attr($tx_id) . '">Verify / Restore</button>';
+}
+
+function clkt_render_timeline_proof_summary($version)
+{
+    $parts = array();
+
+    $content_hash = isset($version['content_hash']) ? sanitize_text_field($version['content_hash']) : '';
+    if ($content_hash !== '') {
+        $short = substr($content_hash, 0, 8) . '…' . substr($content_hash, -4);
+        $parts[] = '<span title="Content hash: ' . esc_attr($content_hash) . '">Hash ' . esc_html($short) . '</span>';
+    }
+
+    if (isset($version['restore_manifest']['attachments']) && is_array($version['restore_manifest']['attachments'])) {
+        $count = count($version['restore_manifest']['attachments']);
+        $parts[] = esc_html($count . ' media');
+    }
+
+    if (empty($parts)) {
+        return '';
+    }
+
+    return '<div class="clkt-timeline-proof-summary">' . implode(' · ', $parts) . '</div>';
+}
+
 // AJAX endpoint to get refreshed timeline HTML
 function clkt_get_timeline_html()
 {
@@ -3143,9 +2905,6 @@ function clkt_get_timeline_html()
 
     // Get the versions and generate timeline HTML
     $versions = get_post_meta($post_id, '_clkt_arweave_versions', true);
-    if (empty($versions)) {
-        $versions = get_post_meta($post_id, '_cc_arweave_versions', true);
-    }
 
     // Ensure versions is an array
     if (!is_array($versions)) {
@@ -3164,16 +2923,11 @@ function clkt_get_timeline_html()
 
     // Create a map of Arweave uploads indexed by their WordPress revision count
     $arweave_by_wp_version = [];
-    $orphaned_uploads = [];
-
     if (!empty($versions)) {
         foreach ($versions as $version) {
             if (isset($version['wp_revision_count'])) {
                 // This upload knows which WordPress revision it belongs to
                 $arweave_by_wp_version[$version['wp_revision_count']] = $version;
-            } else {
-                // Legacy upload without revision tracking
-                $orphaned_uploads[] = $version;
             }
         }
     }
@@ -3224,6 +2978,8 @@ function clkt_get_timeline_html()
                 $timeline_html .= '</div>';
                 if ($is_valid_tx) {
                     $timeline_html .= '<div class="clkt-timeline-tx">' . esc_html(substr($tx_id, 0, 8)) . '...' . esc_html(substr($tx_id, -6)) . '</div>';
+                    $timeline_html .= clkt_render_timeline_proof_summary($version);
+                    $timeline_html .= clkt_render_restore_proof_button($post_id, $tx_id);
                 } else {
                     $timeline_html .= '<div class="clkt-timeline-tx" style="color: #dc3545; font-size: 10px;">' . esc_html(substr($tx_id, 0, 20)) . '...</div>';
                 }
@@ -3289,6 +3045,8 @@ function clkt_get_timeline_html()
                     $timeline_html .= '</div>';
                     if ($is_valid_tx) {
                         $timeline_html .= '<div class="clkt-timeline-tx">' . esc_html(substr($v_tx_id, 0, 8)) . '...' . esc_html(substr($v_tx_id, -6)) . '</div>';
+                        $timeline_html .= clkt_render_timeline_proof_summary($version);
+                        $timeline_html .= clkt_render_restore_proof_button($post_id, $v_tx_id);
                     } else {
                         $timeline_html .= '<div class="clkt-timeline-tx" style="color: #dc3545; font-size: 10px;">' . esc_html(substr($v_tx_id, 0, 20)) . '...</div>';
                     }
@@ -3301,58 +3059,6 @@ function clkt_get_timeline_html()
             $version_num--;
         }
 
-        // Add orphaned uploads (legacy uploads without wp_revision_count)
-        foreach ($orphaned_uploads as $version) {
-            $v_tx_id = '';
-            if (isset($version['tx_id'])) {
-                $v_tx_id = $version['tx_id'];
-            } else if (isset($version['arweave_url'])) {
-                $v_tx_id = basename($version['arweave_url']);
-            } else if (isset($version['id'])) {
-                $v_tx_id = $version['id'];
-            }
-
-            $timeline_html .= '<div class="clkt-timeline-item">';
-            $timeline_html .= '<div class="clkt-timeline-dot uploaded">❓</div>';
-            $timeline_html .= '<div class="clkt-timeline-details">';
-            $timeline_html .= '<div class="clkt-timeline-version">Legacy Upload';
-            if (isset($version['post_title'])) {
-                $timeline_html .= ' <span style="font-size: 11px; color: #888;">(' . esc_html($version['post_title']) . ')</span>';
-            }
-            $timeline_html .= '</div>';
-
-            // Use timestamp if available
-            $date = isset($version['timestamp']) ?
-                gmdate('Y-m-d H:i', $version['timestamp']) :
-                'Date unknown';
-            $timeline_html .= '<div class="clkt-timeline-date">' . esc_html($date) . '</div>';
-
-            // Validate TX ID (also filters TEST_ IDs in production mode)
-            $is_valid_tx = clkt_is_valid_tx_id($v_tx_id);
-
-            if ($v_tx_id) {
-                $timeline_html .= '<div class="clkt-timeline-status">';
-                if ($is_valid_tx) {
-                    $timeline_html .= '<span class="clkt-timeline-badge clkt-verify-tx" data-tx-id="' . esc_attr($v_tx_id) . '" data-post-id="' . esc_attr($post_id) . '">verifying...</span>';
-                } else {
-                    $timeline_html .= '<span class="clkt-timeline-badge invalid" style="background: #dc3545; color: white;">invalid TX</span>';
-                }
-                if ($is_valid_tx) {
-                    $timeline_html .= '<a href="' . esc_url('https://arweave.net/' . $v_tx_id) . '" target="_blank" class="clkt-timeline-link">';
-                    $timeline_html .= '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20">';
-                    $timeline_html .= '<path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>';
-                    $timeline_html .= '<path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>';
-                    $timeline_html .= '</svg></a>';
-                }
-                $timeline_html .= '</div>';
-                if ($is_valid_tx) {
-                    $timeline_html .= '<div class="clkt-timeline-tx">' . esc_html(substr($v_tx_id, 0, 8)) . '...' . esc_html(substr($v_tx_id, -6)) . '</div>';
-                } else {
-                    $timeline_html .= '<div class="clkt-timeline-tx" style="color: #dc3545; font-size: 10px;">' . esc_html(substr($v_tx_id, 0, 20)) . '...</div>';
-                }
-            }
-            $timeline_html .= '</div></div>';
-        }
     }
 
     wp_send_json_success(array(
@@ -3411,13 +3117,18 @@ function clkt_create_transaction_table()
 register_activation_hook(__FILE__, 'clkt_create_transaction_table');
 
 // Add actions
-add_action('admin_enqueue_scripts', 'clkt_enqueue_scripts');
+add_action('admin_enqueue_scripts', 'clkt_enqueue_plugin_admin_assets');
 
 function clkt_add_scripts_to_footer()
 {
     $js = '
         document.addEventListener("DOMContentLoaded", function () {
-            console.log("Initializing CLKT");
+            var clktDebugLog = function() {
+                if (window.clkt_ajax_obj && window.clkt_ajax_obj.debug) {
+                    console.log.apply(console, arguments);
+                }
+            };
+            clktDebugLog("Initializing CLKT");
 
             try {
                 // Initialize Arweave with default configuration
@@ -3426,11 +3137,11 @@ function clkt_add_scripts_to_footer()
                     arweave: arweave
                 };
 
-                console.log("Arweave initialized successfully");
+                clktDebugLog("Arweave initialized successfully");
 
                 // Test connection
                 arweave.network.getInfo().then(function(info) {
-                    console.log("Connected to Arweave network:", info);
+                    clktDebugLog("Connected to Arweave network:", info);
                 }).catch(function(error) {
                     console.error("Error connecting to Arweave network:", error);
                 });
@@ -3560,120 +3271,6 @@ function clkt_create_test_post()
 }
 add_action('wp_ajax_clkt_create_test_post', 'clkt_create_test_post');
 
-// Debug endpoint to check meta keys
-function clkt_check_meta_keys()
-{
-    check_ajax_referer('clkt_ajax_nonce', 'nonce');
-
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('Insufficient permissions');
-        return;
-    }
-
-    $result = array(
-        'posts_checked' => 0,
-        'with_new_meta' => 0,
-        'with_old_meta' => 0,
-        'with_no_meta' => 0,
-        'examples' => array()
-    );
-
-    $posts = get_posts(array(
-        'post_type' => 'post',
-        'post_status' => 'publish',
-        'posts_per_page' => -1,
-        'orderby' => 'ID',
-        'order' => 'ASC'
-    ));
-
-    foreach ($posts as $post) {
-        $result['posts_checked']++;
-
-        // Check new meta key
-        $new_versions = get_post_meta($post->ID, '_clkt_arweave_versions', true);
-        // Check old meta key
-        $old_versions = get_post_meta($post->ID, '_cc_arweave_versions', true);
-
-        if (!empty($new_versions) && is_array($new_versions)) {
-            $result['with_new_meta']++;
-            if (count($result['examples']) < 3) {
-                $result['examples'][] = array(
-                    'id' => $post->ID,
-                    'title' => $post->post_title,
-                    'meta_type' => 'new (_clkt_)',
-                    'versions' => count($new_versions)
-                );
-            }
-        } elseif (!empty($old_versions) && is_array($old_versions)) {
-            $result['with_old_meta']++;
-            if (count($result['examples']) < 3) {
-                $result['examples'][] = array(
-                    'id' => $post->ID,
-                    'title' => $post->post_title,
-                    'meta_type' => 'old (_cc_)',
-                    'versions' => count($old_versions)
-                );
-            }
-        } else {
-            $result['with_no_meta']++;
-        }
-    }
-
-    wp_send_json_success($result);
-}
-add_action('wp_ajax_clkt_check_meta_keys', 'clkt_check_meta_keys');
-
-// Run meta key migration via AJAX
-function clkt_run_migration()
-{
-    check_ajax_referer('clkt_ajax_nonce', 'nonce');
-
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('Insufficient permissions');
-        return;
-    }
-
-    global $wpdb;
-
-    // Define the meta key mappings
-    $meta_key_mappings = array(
-        '_cc_arweave_versions' => '_clkt_arweave_versions',
-        '_cc_arweave_tx_id' => '_clkt_current_tx_id',
-        '_cc_arweave_status' => '_clkt_arweave_status',
-        '_cc_arweave_url' => '_clkt_arweave_url',
-        '_cc_arweave_block_height' => '_clkt_arweave_block_height',
-        '_cc_arweave_block_timestamp' => '_clkt_arweave_block_timestamp',
-        '_cc_encrypted' => '_clkt_encrypted',
-        '_cc_encryption_key' => '_clkt_encryption_key'
-    );
-
-    $total_updated = 0;
-    $details = array();
-
-    foreach ($meta_key_mappings as $old_key => $new_key) {
-        // Update post meta
-        $updated = $wpdb->update(
-            $wpdb->postmeta,
-            array('meta_key' => $new_key),
-            array('meta_key' => $old_key),
-            array('%s'),
-            array('%s')
-        );
-
-        if ($updated > 0) {
-            $details[] = "Updated $updated entries: $old_key -> $new_key";
-            $total_updated += $updated;
-        }
-    }
-
-    wp_send_json_success(array(
-        'message' => "Migration complete! Updated $total_updated meta entries.",
-        'total_updated' => $total_updated,
-        'details' => $details
-    ));
-}
-add_action('wp_ajax_clkt_run_migration', 'clkt_run_migration');
-
 // Check for pending uploads (auto-upload feature)
 function clkt_check_pending_upload()
 {
@@ -3686,14 +3283,10 @@ function clkt_check_pending_upload()
         return;
     }
 
-    // Check both meta keys for pending uploads
-    $arweave_status = get_post_meta($post_id, '_clkt_arweave_status', true);
     $pending_upload = get_post_meta($post_id, '_clkt_pending_upload', true);
 
-    $is_pending = ($arweave_status === 'pending_auto_upload') || !empty($pending_upload);
-
     wp_send_json_success(array(
-        'pending' => $is_pending,
+        'pending' => !empty($pending_upload),
         'encrypt' => isset($pending_upload['encrypt']) ? $pending_upload['encrypt'] : false
     ));
 }
@@ -3713,7 +3306,6 @@ function clkt_debug_post_meta()
 
     $versions = get_post_meta($post_id, '_clkt_arweave_versions', true);
     $current_tx_id = get_post_meta($post_id, '_clkt_current_tx_id', true);
-    $status = get_post_meta($post_id, '_clkt_arweave_status', true);
 
     // Also check auto-upload settings
     $global_auto_save = get_option('clkt_global_auto_save', false);
@@ -3724,7 +3316,6 @@ function clkt_debug_post_meta()
         'post_id' => $post_id,
         'versions' => $versions,
         'current_tx_id' => $current_tx_id,
-        'status' => $status,
         'versions_count' => is_array($versions) ? count($versions) : 0,
         'is_uploaded' => !empty($current_tx_id),
         // Auto-upload diagnostics
@@ -3734,21 +3325,6 @@ function clkt_debug_post_meta()
     ));
 }
 add_action('wp_ajax_clkt_debug_post_meta', 'clkt_debug_post_meta');
-
-// Manual migration trigger for testing
-function clkt_force_migration()
-{
-    check_ajax_referer('clkt_ajax_nonce', 'nonce');
-
-    if (!current_user_can('manage_options')) {
-        wp_send_json_error('Insufficient permissions');
-        return;
-    }
-
-    $count = clkt_migrate_current_tx_ids();
-    wp_send_json_success(array('migrated_count' => $count));
-}
-add_action('wp_ajax_clkt_force_migration', 'clkt_force_migration');
 
 // AJAX handler to get Arweave metadata for an attachment
 function clkt_get_attachment_arweave()
@@ -3813,6 +3389,329 @@ function clkt_save_attachment_arweave()
     ]);
 }
 add_action('wp_ajax_clkt_save_attachment_arweave', 'clkt_save_attachment_arweave');
+
+function clkt_get_version_tx_id($version)
+{
+    if (!is_array($version)) {
+        return '';
+    }
+
+    if (!empty($version['transactionId'])) {
+        return sanitize_text_field($version['transactionId']);
+    }
+
+    if (!empty($version['tx_id'])) {
+        return sanitize_text_field($version['tx_id']);
+    }
+
+    if (!empty($version['id'])) {
+        return sanitize_text_field($version['id']);
+    }
+
+    if (!empty($version['arweave_url'])) {
+        return sanitize_text_field(basename($version['arweave_url']));
+    }
+
+    return '';
+}
+
+function clkt_get_restore_proof_version($post_id, $tx_id = '')
+{
+    $versions = get_post_meta($post_id, '_clkt_arweave_versions', true);
+    if (!is_array($versions)) {
+        return null;
+    }
+
+    $versions = array_reverse($versions);
+
+    foreach ($versions as $version) {
+        if (empty($version['restore_manifest']) || !is_array($version['restore_manifest'])) {
+            continue;
+        }
+
+        $version_tx_id = clkt_get_version_tx_id($version);
+        if ($tx_id === '' || hash_equals($version_tx_id, $tx_id)) {
+            return $version;
+        }
+    }
+
+    return null;
+}
+
+function clkt_build_restore_preview_from_manifest($manifest)
+{
+    $post = isset($manifest['post']) && is_array($manifest['post']) ? $manifest['post'] : array();
+    $content = isset($manifest['content']) && is_array($manifest['content']) ? $manifest['content'] : array();
+    $attachments = isset($manifest['attachments']) && is_array($manifest['attachments']) ? $manifest['attachments'] : array();
+
+    return array(
+        'title' => isset($post['title']) ? (string) $post['title'] : 'Untitled',
+        'content' => !empty($post['contentRaw']) ? (string) $post['contentRaw'] : (isset($post['contentRendered']) ? (string) $post['contentRendered'] : ''),
+        'excerpt' => !empty($post['excerptRaw']) ? (string) $post['excerptRaw'] : (isset($post['excerptRendered']) ? wp_strip_all_tags((string) $post['excerptRendered']) : ''),
+        'original_post_id' => isset($post['id']) ? absint($post['id']) : 0,
+        'post_type' => isset($post['postType']) ? sanitize_key($post['postType']) : 'post',
+        'source_tx_id' => isset($content['txId']) ? sanitize_text_field($content['txId']) : '',
+        'source_url' => isset($content['url']) ? esc_url_raw($content['url']) : '',
+        'content_hash' => isset($content['contentHash']) ? sanitize_text_field($content['contentHash']) : '',
+        'package_hash' => isset($content['packageHash']) ? sanitize_text_field($content['packageHash']) : '',
+        'encrypted' => !empty($content['encrypted']),
+        'attachments' => array_values($attachments),
+        'attachment_count' => count($attachments),
+    );
+}
+
+function clkt_verify_restore_manifest($version, $manifest)
+{
+    $tx_id = clkt_get_version_tx_id($version);
+    $content = isset($manifest['content']) && is_array($manifest['content']) ? $manifest['content'] : array();
+    $expected_package_hash = isset($content['packageHash']) ? sanitize_text_field($content['packageHash']) : '';
+    $expected_content_hash = isset($content['contentHash']) ? sanitize_text_field($content['contentHash']) : '';
+
+    if ($tx_id === '' || $tx_id === '[object Object]') {
+        return array(
+            'status' => 'mismatch',
+            'message' => 'The saved version does not contain a valid transaction ID.',
+            'checked_at' => current_time('mysql', true),
+        );
+    }
+
+    if (strpos($tx_id, 'TEST_') === 0) {
+        $manifest_tx_id = isset($content['txId']) ? sanitize_text_field($content['txId']) : '';
+        $manifest_hash = isset($version['content_hash']) ? sanitize_text_field($version['content_hash']) : '';
+        $hash_matches = $expected_content_hash === '' || $manifest_hash === '' || hash_equals($expected_content_hash, $manifest_hash);
+
+        return array(
+            'status' => ($manifest_tx_id === $tx_id && $hash_matches) ? 'verified' : 'mismatch',
+            'message' => ($manifest_tx_id === $tx_id && $hash_matches)
+                ? 'Test upload verified from the saved restore manifest.'
+                : 'Test upload manifest does not match the saved version metadata.',
+            'source' => 'stored_manifest',
+            'checked_at' => current_time('mysql', true),
+        );
+    }
+
+    $response = wp_remote_get('https://arweave.net/' . rawurlencode($tx_id), array(
+        'timeout' => 15,
+        'redirection' => 3,
+    ));
+
+    if (is_wp_error($response)) {
+        return array(
+            'status' => 'unavailable',
+            'message' => $response->get_error_message(),
+            'source' => 'arweave',
+            'checked_at' => current_time('mysql', true),
+        );
+    }
+
+    $status_code = (int) wp_remote_retrieve_response_code($response);
+    if ($status_code < 200 || $status_code >= 300) {
+        return array(
+            'status' => 'unavailable',
+            'message' => 'Arweave gateway returned HTTP ' . $status_code . '.',
+            'source' => 'arweave',
+            'checked_at' => current_time('mysql', true),
+        );
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    $actual_package_hash = hash('sha256', $body);
+    $package_matches = $expected_package_hash === '' || hash_equals($expected_package_hash, $actual_package_hash);
+
+    $content_matches = true;
+    $decoded = json_decode($body, true);
+    if (is_array($decoded) && $expected_content_hash !== '' && !empty($decoded['clkt_content_hash'])) {
+        $content_matches = hash_equals($expected_content_hash, sanitize_text_field($decoded['clkt_content_hash']));
+    }
+
+    $verified = $package_matches && $content_matches;
+
+    return array(
+        'status' => $verified ? 'verified' : 'mismatch',
+        'message' => $verified
+            ? 'Permaweb package matches the saved restore manifest.'
+            : 'Permaweb package does not match the saved restore manifest.',
+        'source' => 'arweave',
+        'expected_package_hash' => $expected_package_hash,
+        'actual_package_hash' => $actual_package_hash,
+        'checked_at' => current_time('mysql', true),
+    );
+}
+
+function clkt_build_restore_proof_response($post_id, $tx_id = '')
+{
+    $version = clkt_get_restore_proof_version($post_id, $tx_id);
+    if (!$version) {
+        return new WP_Error('clkt_restore_manifest_missing', 'No restore manifest found for this upload.');
+    }
+
+    $manifest = $version['restore_manifest'];
+    $verification = clkt_verify_restore_manifest($version, $manifest);
+    $preview = clkt_build_restore_preview_from_manifest($manifest);
+
+    if (empty($preview['title']) || empty($preview['content'])) {
+        return new WP_Error('clkt_restore_manifest_incomplete', 'Restore manifest is missing restorable post content.');
+    }
+
+    return array(
+        'version' => array(
+            'tx_id' => clkt_get_version_tx_id($version),
+            'timestamp' => isset($version['timestamp']) ? absint($version['timestamp']) : 0,
+            'content_hash' => isset($version['content_hash']) ? sanitize_text_field($version['content_hash']) : '',
+        ),
+        'verification' => $verification,
+        'preview' => $preview,
+        'manifest' => $manifest,
+    );
+}
+
+function clkt_restore_proof_preview()
+{
+    check_ajax_referer('clkt_ajax_nonce', 'nonce');
+
+    $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+    $tx_id = isset($_POST['tx_id']) ? sanitize_text_field(wp_unslash($_POST['tx_id'])) : '';
+
+    if (!$post_id || !current_user_can('edit_post', $post_id)) {
+        wp_send_json_error(array('message' => 'Permission denied'));
+        return;
+    }
+
+    $response = clkt_build_restore_proof_response($post_id, $tx_id);
+    if (is_wp_error($response)) {
+        wp_send_json_error(array('message' => $response->get_error_message()));
+        return;
+    }
+
+    wp_send_json_success($response);
+}
+add_action('wp_ajax_clkt_restore_proof_preview', 'clkt_restore_proof_preview');
+
+function clkt_restore_proof_create_draft()
+{
+    check_ajax_referer('clkt_ajax_nonce', 'nonce');
+
+    $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+    $tx_id = isset($_POST['tx_id']) ? sanitize_text_field(wp_unslash($_POST['tx_id'])) : '';
+
+    if (!$post_id || !current_user_can('edit_post', $post_id)) {
+        wp_send_json_error(array('message' => 'Permission denied'));
+        return;
+    }
+
+    $response = clkt_build_restore_proof_response($post_id, $tx_id);
+    if (is_wp_error($response)) {
+        wp_send_json_error(array('message' => $response->get_error_message()));
+        return;
+    }
+
+    $preview = $response['preview'];
+
+    $decrypted_title = isset($_POST['decrypted_title']) ? sanitize_text_field(wp_unslash($_POST['decrypted_title'])) : '';
+    $decrypted_content = isset($_POST['decrypted_content']) ? wp_unslash($_POST['decrypted_content']) : '';
+    $decrypted_excerpt = isset($_POST['decrypted_excerpt']) ? sanitize_textarea_field(wp_unslash($_POST['decrypted_excerpt'])) : '';
+
+    $restore_title = $decrypted_title !== '' ? $decrypted_title : ($preview['title'] ?: 'Untitled');
+    $restore_content = $decrypted_content !== '' ? wp_kses_post($decrypted_content) : $preview['content'];
+    $restore_excerpt = $decrypted_excerpt !== '' ? $decrypted_excerpt : $preview['excerpt'];
+
+    $restore_post_type = !empty($preview['post_type']) && clkt_is_supported_post_type($preview['post_type'])
+        ? $preview['post_type']
+        : 'post';
+    $draft_id = wp_insert_post(array(
+        'post_title' => sprintf('Restored: %s', sanitize_text_field($restore_title)),
+        'post_content' => $restore_content,
+        'post_excerpt' => sanitize_textarea_field($restore_excerpt),
+        'post_status' => 'draft',
+        'post_type' => $restore_post_type,
+        'post_author' => get_current_user_id(),
+    ), true);
+
+    if (is_wp_error($draft_id)) {
+        wp_send_json_error(array('message' => $draft_id->get_error_message()));
+        return;
+    }
+
+    update_post_meta($draft_id, '_clkt_restored_from_post_id', $post_id);
+    update_post_meta($draft_id, '_clkt_restored_from_tx_id', $response['version']['tx_id']);
+    update_post_meta($draft_id, '_clkt_restore_manifest_hash', $preview['package_hash']);
+
+    wp_send_json_success(array(
+        'message' => 'Restore draft created.',
+        'draft_id' => $draft_id,
+        'edit_url' => get_edit_post_link($draft_id, 'raw'),
+        'source_tx_id' => $response['version']['tx_id'],
+    ));
+}
+add_action('wp_ajax_clkt_restore_proof_create_draft', 'clkt_restore_proof_create_draft');
+
+function clkt_build_permanent_edition($post_id, $tx_id = '')
+{
+    $version = clkt_get_restore_proof_version($post_id, $tx_id);
+    if (!$version) {
+        return null;
+    }
+
+    $manifest = isset($version['restore_manifest']) && is_array($version['restore_manifest']) ? $version['restore_manifest'] : array();
+    $content = isset($manifest['content']) && is_array($manifest['content']) ? $manifest['content'] : array();
+    $post = isset($manifest['post']) && is_array($manifest['post']) ? $manifest['post'] : array();
+    $attachments = isset($manifest['attachments']) && is_array($manifest['attachments']) ? $manifest['attachments'] : array();
+
+    $resolved_tx_id = clkt_get_version_tx_id($version);
+    $is_test = strpos($resolved_tx_id, 'TEST_') === 0;
+
+    $edition = array(
+        'schema' => 'clkt-permanent-edition-v1',
+        'schemaVersion' => '1.0.0',
+        'generatedAt' => current_time('c'),
+        'title' => isset($post['title']) ? sanitize_text_field($post['title']) : get_the_title($post_id),
+        'author' => isset($post['author']) ? sanitize_text_field($post['author']) : get_the_author_meta('display_name', get_post_field('post_author', $post_id)),
+        'sourceUrl' => isset($post['link']) ? esc_url_raw($post['link']) : get_permalink($post_id),
+        'arweave' => array(
+            'txId' => sanitize_text_field($resolved_tx_id),
+            'url' => $is_test ? null : 'https://arweave.net/' . rawurlencode($resolved_tx_id),
+            'test' => $is_test,
+        ),
+        'proof' => array(
+            'contentHash' => isset($content['contentHash']) ? sanitize_text_field($content['contentHash']) : (isset($version['content_hash']) ? sanitize_text_field($version['content_hash']) : ''),
+            'packageHash' => isset($content['packageHash']) ? sanitize_text_field($content['packageHash']) : '',
+            'encrypted' => !empty($content['encrypted']),
+            'mediaCount' => count($attachments),
+        ),
+        'timestamp' => isset($version['timestamp']) ? absint($version['timestamp']) : 0,
+        'pluginVersion' => isset($manifest['pluginVersion']) ? sanitize_text_field($manifest['pluginVersion']) : '',
+        'verifyUrl' => $is_test ? null : 'https://arweave.net/' . rawurlencode($resolved_tx_id),
+    );
+
+    $license = get_post_meta($post_id, '_clkt_license', true);
+    if (!empty($license) && is_array($license)) {
+        $edition['license'] = array_intersect_key($license, array_flip(array('spdx', 'url', 'note')));
+    }
+
+    return $edition;
+}
+
+function clkt_get_permanent_edition()
+{
+    check_ajax_referer('clkt_ajax_nonce', 'nonce');
+
+    $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+    $tx_id = isset($_POST['tx_id']) ? sanitize_text_field(wp_unslash($_POST['tx_id'])) : '';
+
+    if (!$post_id || !current_user_can('edit_post', $post_id)) {
+        wp_send_json_error(array('message' => 'Permission denied'));
+        return;
+    }
+
+    $edition = clkt_build_permanent_edition($post_id, $tx_id);
+    if (!$edition) {
+        wp_send_json_error(array('message' => 'No Permanent Edition available for this upload.'));
+        return;
+    }
+
+    wp_send_json_success(array('edition' => $edition));
+}
+add_action('wp_ajax_clkt_get_permanent_edition', 'clkt_get_permanent_edition');
 
 /**
  * Save upload version metadata after successful upload
@@ -3897,8 +3796,29 @@ function clkt_save_upload_version()
     $wp_revisions = wp_get_post_revisions($post_id);
     $wp_revision_count = count($wp_revisions) + 1;
 
+    $restore_manifest = array();
+    if (isset($_POST['restore_manifest'])) {
+        $manifest_json = wp_unslash($_POST['restore_manifest']);
+        $decoded_manifest = json_decode($manifest_json, true);
+
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded_manifest)) {
+            $restore_manifest = $decoded_manifest;
+        }
+    }
+
+    if (!empty($restore_manifest)) {
+        if (!isset($restore_manifest['content']) || !is_array($restore_manifest['content'])) {
+            $restore_manifest['content'] = array();
+        }
+
+        $restore_manifest['content']['txId'] = $tx_id;
+        $restore_manifest['content']['url'] = $arweave_url ?: 'https://arweave.net/' . $tx_id;
+        $restore_manifest['content']['contentHash'] = $uploaded_content_hash;
+        $restore_manifest['savedAt'] = current_time('mysql', true);
+    }
+
     // Add new version with current content hash
-    $versions[] = array(
+    $new_version = array(
         'id' => $tx_id,
         'tx_id' => $tx_id,
         'transactionId' => $tx_id, // Add this for consistency with version checking code
@@ -3911,14 +3831,22 @@ function clkt_save_upload_version()
         'service' => 'self_wallet' // Uploaded via new component system
     );
 
+    if (!empty($restore_manifest)) {
+        $new_version['restore_manifest'] = $restore_manifest;
+    }
+
+    $versions[] = $new_version;
+
     update_post_meta($post_id, '_clkt_arweave_versions', $versions);
     update_post_meta($post_id, '_clkt_current_tx_id', $tx_id);
     update_post_meta($post_id, '_clkt_content_hash', $uploaded_content_hash);
+    if (!empty($restore_manifest)) {
+        update_post_meta($post_id, '_clkt_latest_restore_manifest', $restore_manifest);
+    }
 
     // Clear pending flags once the saved version represents the current post content.
     if ($current_hash_has_version || $uploaded_content_hash === $current_content_hash) {
         delete_post_meta($post_id, '_clkt_pending_upload');
-        delete_post_meta($post_id, '_clkt_arweave_status');
     }
 
     // Clear object cache to ensure subsequent reads get fresh data
@@ -3932,40 +3860,3 @@ function clkt_save_upload_version()
     ));
 }
 add_action('wp_ajax_clkt_save_upload_version', 'clkt_save_upload_version');
-
-// Migration function to update existing posts with current TX ID
-function clkt_migrate_current_tx_ids()
-{
-    global $wpdb;
-
-    // Find ALL posts that have versions (ignore current TX ID status for this migration)
-    $posts_with_versions = $wpdb->get_results(
-        "SELECT post_id, meta_value
-         FROM {$wpdb->postmeta}
-         WHERE meta_key = '_clkt_arweave_versions'"
-    );
-
-    $migrated_count = 0;
-    foreach ($posts_with_versions as $row) {
-        $versions = maybe_unserialize($row->meta_value);
-        if (is_array($versions) && !empty($versions)) {
-            // Get the latest version (last in array)
-            $latest_version = end($versions);
-            if (isset($latest_version['tx_id']) && !empty($latest_version['tx_id'])) {
-                // Update or set the current TX ID to the latest version
-                update_post_meta($row->post_id, '_clkt_current_tx_id', $latest_version['tx_id']);
-                $migrated_count++;
-            }
-        }
-    }
-
-    return $migrated_count;
-}
-
-// Run migration on admin init (force re-run to fix any issues)
-add_action('admin_init', function () {
-    if (!get_option('clkt_current_tx_migrated_v2')) {
-        $count = clkt_migrate_current_tx_ids();
-        update_option('clkt_current_tx_migrated_v2', true);
-    }
-});

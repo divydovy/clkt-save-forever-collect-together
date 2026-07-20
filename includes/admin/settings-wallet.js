@@ -1,5 +1,104 @@
 jQuery(document).ready(function($) {
     var walletConnected = false;
+    var walletProvider = (window.clkt_ajax_obj && window.clkt_ajax_obj.wallet_provider) || 'evm';
+    var isEvmWallet = walletProvider === 'evm';
+
+    function text(value) {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function randomId() {
+        if (window.crypto && window.crypto.randomUUID) {
+            return window.crypto.randomUUID();
+        }
+
+        return String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+    }
+
+    function utf8ToHex(value) {
+        return '0x' + Array.from(new TextEncoder().encode(value))
+            .map(function(byte) { return byte.toString(16).padStart(2, '0'); })
+            .join('');
+    }
+
+    function bytesToBase64Url(value) {
+        var bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+        var binary = Array.from(bytes)
+            .map(function(byte) { return String.fromCharCode(byte); })
+            .join('');
+
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+
+    function buildIdentityLinkMessage(evmAddress, arweaveAddress, issuedAt, nonce) {
+        return JSON.stringify({
+            schema: 'clkt-identity-link-v1',
+            schemaVersion: '1.0.0',
+            action: 'link-wallets',
+            handle: '',
+            wallets: [
+                { namespace: 'eip155:8453', address: text(evmAddress).toLowerCase() },
+                { namespace: 'arweave', address: text(arweaveAddress) }
+            ],
+            nonce: nonce,
+            issuedAt: issuedAt
+        });
+    }
+
+    function buildIdentityLinkRecord(evmAddress, arweaveAddress, message, issuedAt, nonce, proofs) {
+        return {
+            schema: 'clkt-identity-link-v1',
+            schemaVersion: '1.0.0',
+            createdAt: new Date().toISOString(),
+            identity: {
+                handle: ''
+            },
+            wallets: [
+                { namespace: 'eip155:8453', address: text(evmAddress).toLowerCase() },
+                { namespace: 'arweave', address: text(arweaveAddress) }
+            ],
+            statement: {
+                action: 'link-wallets',
+                message: message,
+                nonce: nonce,
+                issuedAt: issuedAt
+            },
+            proofs: proofs
+        };
+    }
+
+    function buildIdentityLinkTags(record) {
+        var evm = record.wallets.find(function(item) { return item.namespace === 'eip155:8453'; });
+        var arweave = record.wallets.find(function(item) { return item.namespace === 'arweave'; });
+
+        return [
+            { name: 'Content-Type', value: 'application/json' },
+            { name: 'Type', value: 'Identity-Link' },
+            { name: 'App-Name', value: 'CLKT' },
+            { name: 'CLKT-Record-Schema', value: 'clkt-identity-link-v1' },
+            { name: 'CLKT-Record-Version', value: '1' },
+            { name: 'Wallet-EVM', value: evm ? evm.address : '' },
+            { name: 'Wallet-Arweave', value: arweave ? arweave.address : '' },
+            { name: 'Identity-Handle', value: '' },
+            { name: 'Payment-Protocol', value: 'x402' },
+            { name: 'Payment-Token', value: 'base-usdc' }
+        ];
+    }
+
+    async function signArweaveIdentityLink(arweaveWallet, arweaveAddress, message) {
+        var signature = await arweaveWallet.signature(new TextEncoder().encode(message), {
+            name: 'RSA-PSS',
+            saltLength: 32
+        });
+
+        return {
+            namespace: 'arweave',
+            address: arweaveAddress,
+            scheme: 'arweave-signature',
+            signature: typeof signature === 'string' ? signature : bytesToBase64Url(signature),
+            signedAt: new Date().toISOString()
+        };
+    }
 
     // Initialize CLKT if needed
     async function initializeCLKT() {
@@ -27,27 +126,32 @@ jQuery(document).ready(function($) {
             $('#status-indicator').removeClass('disconnected').addClass('connected');
             $('#wallet-status-text').text('Connected');
             $('#wallet-address').text(address || 'Loading...');
-            $('#wallet-balance').text(balance ? balance + ' AR' : 'Loading...');
+            $('#wallet-balance').text(isEvmWallet ? 'Base USDC via wallet approval' : (balance ? balance + ' AR' : 'Loading...'));
             $('#connect-wallet-btn').hide();
-            $('#disconnect-wallet-btn, #refresh-balance-btn').show();
+            $('#disconnect-wallet-btn').show();
+            $('#refresh-balance-btn').toggle(!isEvmWallet);
 
             if (address) {
-                var permanentViewerUrl = 'https://2deruxhrgmrp2browgc472rhocjc7xjbkrpac7bmg6psfq26ue7q.arweave.net/0MkaXPEzIv0GLrGFz-oncJIv3SFUXgF8LDefIsNeoT8?wallet=' + encodeURIComponent(address);
+                var permanentViewerUrl = isEvmWallet
+                    ? 'https://app.getclkt.com/collect#collector=' + encodeURIComponent(address)
+                    : 'https://2deruxhrgmrp2browgc472rhocjc7xjbkrpac7bmg6psfq26ue7q.arweave.net/0MkaXPEzIv0GLrGFz-oncJIv3SFUXgF8LDefIsNeoT8?wallet=' + encodeURIComponent(address);
                 $('#permanent-viewer-link').attr('href', permanentViewerUrl).text(permanentViewerUrl);
 
-                var arscanUrl = 'https://arscan.io/address/' + address;
+                var arscanUrl = isEvmWallet ? 'https://basescan.org/address/' + address : 'https://arscan.io/address/' + address;
                 $('#arscan-link').attr('href', arscanUrl).text(arscanUrl);
 
-                var viewblockUrl = 'https://viewblock.io/arweave/address/' + address;
+                var viewblockUrl = isEvmWallet ? 'https://basescan.org/address/' + address : 'https://viewblock.io/arweave/address/' + address;
                 $('#viewblock-link').attr('href', viewblockUrl).text(viewblockUrl);
 
                 var goldskyUrl = 'https://arweave-search.goldsky.com/graphql';
                 $('#goldsky-gql-link').attr('href', goldskyUrl).text(goldskyUrl);
 
-                var gqlQuery = 'query {\n  transactions(\n    owners: ["' + address + '"]\n    tags: [\n      { name: "App-Name", values: ["ContentCloud"] }\n    ]\n    first: 100\n    sort: HEIGHT_DESC\n  ) {\n    edges {\n      node {\n        id\n        tags {\n          name\n          value\n        }\n        block {\n          timestamp\n        }\n      }\n    }\n  }\n}';
+                var gqlQuery = isEvmWallet
+                    ? 'query {\n  transactions(\n    tags: [\n      { name: "App-Name", values: ["CLKT"] },\n      { name: "Collector", values: ["' + address + '"] }\n    ]\n    first: 100\n    sort: HEIGHT_DESC\n  ) {\n    edges {\n      node {\n        id\n        tags {\n          name\n          value\n        }\n        block {\n          timestamp\n        }\n      }\n    }\n  }\n}'
+                    : 'query {\n  transactions(\n    owners: ["' + address + '"]\n    tags: [\n      { name: "App-Name", values: ["ContentCloud"] }\n    ]\n    first: 100\n    sort: HEIGHT_DESC\n  ) {\n    edges {\n      node {\n        id\n        tags {\n          name\n          value\n        }\n        block {\n          timestamp\n        }\n      }\n    }\n  }\n}';
                 $('#gql-query-display').text(gqlQuery);
 
-                console.log('GraphQL Query to find all ContentCloud uploads (including bundled items):');
+                console.log('GraphQL query to find CLKT uploads including bundled items:');
                 console.log(gqlQuery);
 
                 $('#copy-gql-btn').off('click').on('click', function() {
@@ -150,12 +254,12 @@ jQuery(document).ready(function($) {
             var initialized = await initializeCLKT();
 
             if (!initialized) {
-                showMessage('Failed to initialize wallet manager. Please ensure Wander wallet is installed.', 'error');
+                showMessage('Failed to initialize wallet manager. Please ensure the selected browser wallet is installed.', 'error');
                 $button.prop('disabled', false).text('Connect Wallet');
                 return;
             }
 
-            if (!window.arweaveWallet) {
+            if (!isEvmWallet && !window.arweaveWallet) {
                 showMessage(
                     'Wander wallet not detected. Please install it from <a href="https://wander.app" target="_blank">wander.app</a> and refresh this page.',
                     'error'
@@ -208,7 +312,7 @@ jQuery(document).ready(function($) {
         try {
             var walletInfo = await window.ContentCloud.permaweb.getWalletInfo();
             if (walletInfo.connected) {
-                $('#wallet-balance').text(walletInfo.balance ? walletInfo.balance + ' AR' : 'Loading...');
+                $('#wallet-balance').text(isEvmWallet ? 'Base USDC via wallet approval' : (walletInfo.balance ? walletInfo.balance + ' AR' : 'Loading...'));
                 showMessage('Balance updated', 'success');
             }
         } catch (error) {
@@ -216,6 +320,111 @@ jQuery(document).ready(function($) {
             showMessage('Failed to refresh balance', 'error');
         } finally {
             $button.prop('disabled', false).text('Refresh Balance');
+        }
+    });
+
+    $('#clkt-link-wallets-btn').on('click', async function() {
+        var $button = $(this);
+        var $result = $('#clkt-identity-link-result');
+
+        $button.prop('disabled', true).text('Linking wallets...');
+        $result.removeAttr('style').css({ marginTop: '12px', display: 'none' }).empty();
+
+        try {
+            var initialized = await initializeCLKT();
+
+            if (!initialized || !window.ContentCloud.permaweb) {
+                throw new Error('Failed to initialize CLKT wallet manager.');
+            }
+
+            if (!isEvmWallet) {
+                throw new Error('Switch Wallet Provider to EVM wallet (Base USDC/x402) before linking wallets.');
+            }
+
+            var walletInfo = await window.ContentCloud.permaweb.getWalletInfo();
+            var walletStatus = window.ContentCloud.permaweb.walletManager.getStatus();
+
+            if (!walletInfo.connected || !walletStatus.wallet) {
+                throw new Error('Connect your EVM wallet before linking Wander.');
+            }
+
+            if (!window.arweaveWallet) {
+                throw new Error('Wander wallet not detected. Install or unlock Wander, then refresh this page.');
+            }
+
+            await window.arweaveWallet.connect(['ACCESS_ADDRESS', 'SIGNATURE']);
+            var arweaveAddress = await window.arweaveWallet.getActiveAddress();
+            var issuedAt = new Date().toISOString();
+            var nonce = randomId();
+            var message = buildIdentityLinkMessage(walletInfo.address, arweaveAddress, issuedAt, nonce);
+
+            showMessage('Sign the identity link with your EVM wallet.', 'info');
+            var evmSignature = await walletStatus.wallet.request({
+                method: 'personal_sign',
+                params: [utf8ToHex(message), walletInfo.address]
+            });
+            var evmProof = {
+                namespace: 'eip155:8453',
+                address: text(walletInfo.address).toLowerCase(),
+                scheme: 'eip191',
+                signature: evmSignature,
+                signedAt: new Date().toISOString()
+            };
+
+            showMessage('Sign the identity link with your Wander wallet.', 'info');
+            var arweaveProof = await signArweaveIdentityLink(window.arweaveWallet, arweaveAddress, message);
+            var record = buildIdentityLinkRecord(walletInfo.address, arweaveAddress, message, issuedAt, nonce, [evmProof, arweaveProof]);
+            var recordJson = JSON.stringify(record);
+            var upload = await window.ContentCloud.permaweb.uploadWithEvmX402({
+                bytes: recordJson,
+                contentType: 'application/json',
+                tags: buildIdentityLinkTags(record),
+                title: 'CLKT identity link',
+                sizeInKB: new Blob([recordJson]).size / 1024
+            });
+            var txId = upload.receipt.id;
+
+            var saveResponse = await $.post(window.clkt_ajax_obj.ajax_url, {
+                action: 'clkt_save_identity_link',
+                nonce: window.clkt_ajax_obj.nonce,
+                tx_id: txId,
+                evm_address: walletInfo.address,
+                arweave_address: arweaveAddress,
+                record: recordJson
+            });
+
+            if (!saveResponse || !saveResponse.success) {
+                throw new Error(saveResponse && saveResponse.data ? saveResponse.data : 'Failed to save identity link in WordPress.');
+            }
+
+            $('#clkt-identity-link-current').html(
+                '<strong>Current identity link:</strong> <a href="https://arweave.net/' + txId + '" target="_blank" style="word-break: break-all;">' + txId + '</a>'
+            );
+            $result
+                .css({
+                    background: '#d4f4dd',
+                    border: '1px solid #00703c',
+                    borderRadius: '4px',
+                    color: '#00703c',
+                    padding: '10px'
+                })
+                .html('Wallets linked. Identity link TX: <a href="https://arweave.net/' + txId + '" target="_blank">' + txId + '</a>')
+                .show();
+            showMessage('Wallet alias created successfully.', 'success');
+        } catch (error) {
+            console.error('Error linking wallets:', error);
+            $result
+                .css({
+                    background: '#fddede',
+                    border: '1px solid #a00',
+                    borderRadius: '4px',
+                    color: '#a00',
+                    padding: '10px'
+                })
+                .text('Failed to link wallets: ' + (error.message || error))
+                .show();
+        } finally {
+            $button.prop('disabled', false).text('Link EVM + Wander Wallets');
         }
     });
 

@@ -139,7 +139,7 @@ function clkt_render_general_settings_tab() {
     <!-- Wallet Warning -->
     <div id="clkt-general-wallet-warning" style="display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 15px; margin-bottom: 20px; color: #856404;">
         <strong>⚠️ No Wallet Connected</strong>
-        <p style="margin: 8px 0 0 0;">You need to connect an Arweave wallet to upload content. Please go to the <a href="?page=clkt-settings&tab=wallet" style="color: #0073aa;">Wallet Settings</a> tab to connect your wallet.</p>
+        <p style="margin: 8px 0 0 0;">You need to connect a browser wallet to upload content. Please go to the <a href="?page=clkt-settings&tab=wallet" style="color: #0073aa;">Wallet Settings</a> tab to connect your wallet.</p>
     </div>
 
     <form method="post" action="options.php">
@@ -214,8 +214,8 @@ function clkt_render_general_settings_tab() {
                                value="<?php echo esc_attr(get_option('clkt_free_dispatch_limit_kb', 100)); ?>"
                                min="1" max="500" class="small-text"> KB
                         <p class="description">
-                            Files under this size upload for free via Arweave bundling (no AR cost). Default: 100KB.<br>
-                            <strong>Note:</strong> This is determined by Arweave's bundling service. Only change if the service limit changes and the plugin hasn't been updated.
+                            Files under this size may upload for free via Turbo/Arweave bundling. Default: 100KB.<br>
+                            <strong>Note:</strong> The bundling service decides the final payment requirement. Larger uploads may require x402 or AR payment depending on the selected wallet provider.
                         </p>
                     </td>
                 </tr>
@@ -257,7 +257,7 @@ function clkt_render_general_settings_tab() {
                         </label>
                         <p class="description">
                             <strong>⚠️ Testing Only:</strong> When enabled, uploads will be simulated with fake transaction IDs.
-                            No real AR will be spent and nothing will be uploaded to Arweave.
+                            No real wallet payment will be signed and nothing will be uploaded to Arweave.
                             All validation logic (size limits, encryption, etc.) still runs normally.
                             Perfect for development and automated testing.
                         </p>
@@ -274,11 +274,11 @@ function clkt_render_general_settings_tab() {
                         <label for="clkt_wallet_type">Wallet Type</label>
                     </th>
                     <td>
-                        <!-- Default to self-managed wallet for initial_release branch -->
+                        <!-- Browser wallet mode: EVM is the low-friction default; Arweave remains available as advanced mode. -->
                         <input type="hidden" name="clkt_wallet_type" id="clkt_wallet_type" value="self">
-                        <p><strong>Self-Managed Wallet Mode</strong></p>
+                        <p><strong>Browser Wallet Mode</strong></p>
                         <p class="description">
-                            Use your own Arweave wallet to upload content to the permaweb.
+                            Use a browser wallet to pay for permanent Arweave uploads. EVM/Base USDC via x402 is the default low-barrier path.
                         </p>
                     </td>
                 </tr>
@@ -289,10 +289,25 @@ function clkt_render_general_settings_tab() {
                     </th>
                     <td>
                         <select name="clkt_wallet_provider" id="clkt_wallet_provider">
-                            <option value="wander" <?php selected(get_option('clkt_wallet_provider', 'wander'), 'wander'); ?>>Wander</option>
+                            <option value="evm" <?php selected(get_option('clkt_wallet_provider', 'evm'), 'evm'); ?>>EVM wallet (Base USDC/x402)</option>
+                            <option value="wander" <?php selected(get_option('clkt_wallet_provider', 'evm'), 'wander'); ?>>Wander / ArConnect (AR)</option>
                         </select>
                         <p class="description">
-                            Browser extension for managing your Arweave wallet.
+                            EVM wallets pay Turbo x402 quotes with Base USDC and do not require an Arweave wallet or AR balance.
+                        </p>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th scope="row">
+                        <label for="clkt_x402_spend_cap_microusdc">x402 Spend Cap</label>
+                    </th>
+                    <td>
+                        <input type="number" name="clkt_x402_spend_cap_microusdc" id="clkt_x402_spend_cap_microusdc"
+                               value="<?php echo esc_attr(get_option('clkt_x402_spend_cap_microusdc', 100000)); ?>"
+                               min="0" step="1" class="regular-text"> microUSDC
+                        <p class="description">
+                            Maximum Base USDC the plugin may ask you to sign per Turbo x402 upload. Default: 100000 microUSDC (0.1 USDC).
                         </p>
                     </td>
                 </tr>
@@ -304,7 +319,7 @@ function clkt_render_general_settings_tab() {
                     <td>
                         <input type="checkbox" name="clkt_show_cost_estimate" id="clkt_show_cost_estimate" value="1"
                                <?php checked(get_option('clkt_show_cost_estimate', '1'), '1'); ?>>
-                        <label for="clkt_show_cost_estimate">Display estimated AR costs before upload</label>
+                        <label for="clkt_show_cost_estimate">Display estimated upload costs before upload</label>
                     </td>
                 </tr>
             </table>
@@ -328,8 +343,8 @@ function clkt_render_wallet_settings_tab() {
         ?>
         
         <div class="clkt-info-box">
-            <h4>🔐 Arweave Wallet Connection</h4>
-            <p>Connect your own Arweave wallet to upload content permanently to the permaweb.</p>
+            <h4>Browser Wallet Connection</h4>
+            <p>Connect your own wallet to upload content permanently to Arweave. EVM/Base USDC via x402 is the default path; Wander/AR remains available as an advanced option.</p>
         </div>
         
         <div class="clkt-settings-section">
@@ -348,7 +363,7 @@ function clkt_render_wallet_settings_tab() {
                         <strong>Balance:</strong> <span id="wallet-balance">-</span>
                     </div>
                     <div id="content-collection-url" style="margin-bottom: 20px; display: none; padding: 12px; background: #f0f8ff; border-left: 4px solid #0073aa; border-radius: 4px;">
-                        <strong>📚 Your Content Collection:</strong>
+                        <strong>Your Content Collection:</strong>
                         <p style="margin: 8px 0 4px 0; font-size: 0.9em; color: #666;">View all your uploaded content. These links work even if your WordPress site goes down.</p>
                         <?php if (get_option('clkt_test_mode', false)): ?>
                         <div style="background: #fcf9e8; border: 1px solid #dba617; padding: 10px; margin: 12px 0; border-radius: 4px;">
@@ -358,10 +373,10 @@ function clkt_render_wallet_settings_tab() {
                         </div>
                         <?php endif; ?>
                         <div style="margin-top: 8px; <?php echo get_option('clkt_test_mode', false) ? 'opacity: 0.4; pointer-events: none;' : ''; ?>">
-                            <strong>📱 Simple Content Viewer (Easy to use!):</strong><br>
+                            <strong>Simple Content Viewer:</strong><br>
                             <a id="permanent-viewer-link" href="#" target="_blank" style="color: #0073aa; word-break: break-all; font-size: 0.9em;"></a>
-                            <br><span style="font-size: 0.85em; color: #28a745;">✓ Best for non-technical users: Beautiful cards showing all your posts and media.</span>
-                            <br><span style="font-size: 0.85em; color: #28a745;">✓ Permanently hosted on Arweave - works forever!</span>
+                            <br><span style="font-size: 0.85em; color: #28a745;">Best for non-technical users: cards showing all your posts and media.</span>
+                            <br><span style="font-size: 0.85em; color: #28a745;">Public Arweave records can be rediscovered via GraphQL.</span>
                             <details style="margin-top: 8px; font-size: 0.85em;">
                                 <summary style="cursor: pointer; color: #0073aa;"><strong>📤 Want to upload your own custom viewer?</strong></summary>
                                 <div style="margin-top: 8px; padding: 10px; background: #f0f8ff; border-left: 3px solid #0073aa;">
@@ -377,15 +392,15 @@ function clkt_render_wallet_settings_tab() {
                             </details>
                         </div>
                         <div style="margin-top: 8px; <?php echo get_option('clkt_test_mode', false) ? 'opacity: 0.4; pointer-events: none;' : ''; ?>">
-                            <strong>ArScan Explorer (Shows ALL uploads including bundled posts):</strong><br>
+                            <strong>Primary Explorer:</strong><br>
                             <a id="arscan-link" href="#" target="_blank" style="color: #0073aa; word-break: break-all; font-size: 0.9em;"></a>
-                            <br><span style="font-size: 0.85em; color: #28a745;">✓ Recommended: Shows both L1 transactions AND bundled data items.</span>
-                            <br><span style="font-size: 0.85em; color: #666;">💡 To view transaction content: Click any transaction, copy its ID, then visit: <code>https://arweave.net/[TX-ID]</code></span>
+                            <br><span style="font-size: 0.85em; color: #28a745;">For EVM wallets this opens BaseScan; for AR wallets this opens ArScan.</span>
+                            <br><span style="font-size: 0.85em; color: #666;">To view Arweave transaction content, copy the transaction ID and visit: <code>https://arweave.net/[TX-ID]</code></span>
                         </div>
                         <div style="margin-top: 8px; <?php echo get_option('clkt_test_mode', false) ? 'opacity: 0.4; pointer-events: none;' : ''; ?>">
-                            <strong>ViewBlock Explorer (L1 transactions only):</strong><br>
+                            <strong>Secondary Explorer:</strong><br>
                             <a id="viewblock-link" href="#" target="_blank" style="color: #0073aa; word-break: break-all; font-size: 0.9em;"></a>
-                            <br><span style="font-size: 0.85em; color: #999;">Shows large files only. Bundled uploads (posts < 100KB) won't appear.</span>
+                            <br><span style="font-size: 0.85em; color: #999;">For EVM wallets this opens BaseScan; for AR wallets this opens ViewBlock.</span>
                         </div>
                         <div style="margin-top: 8px;">
                             <details style="font-size: 0.9em;">
@@ -420,37 +435,58 @@ function clkt_render_wallet_settings_tab() {
                 </div>
             </div>
         </div>
+
+        <div class="clkt-settings-section">
+            <h3>Wallet Alias</h3>
+            <div class="wallet-connection-box">
+                <p style="margin-top: 0;">Link your EVM wallet to an existing Wander/Arweave wallet so CLKT can resolve both histories as one public library.</p>
+                <p class="description">This creates a public <code>clkt-identity-link-v1</code> record on Arweave. Use this when moving from Wander/AR to EVM/Base USDC.</p>
+                <?php $identity_link = get_option('clkt_identity_link', array()); ?>
+                <div id="clkt-identity-link-current" style="margin: 12px 0; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;">
+                    <strong>Current identity link:</strong>
+                    <?php if (!empty($identity_link['tx_id'])): ?>
+                        <a href="https://arweave.net/<?php echo esc_attr($identity_link['tx_id']); ?>" target="_blank" style="word-break: break-all;"><?php echo esc_html($identity_link['tx_id']); ?></a>
+                    <?php else: ?>
+                        <span>None saved</span>
+                    <?php endif; ?>
+                </div>
+                <button type="button" class="button button-primary" id="clkt-link-wallets-btn">
+                    Link EVM + Wander Wallets
+                </button>
+                <div id="clkt-identity-link-result" style="margin-top: 12px; display: none;"></div>
+            </div>
+        </div>
         
         <div class="clkt-settings-section">
-            <h3>Getting Started with Arweave</h3>
+            <h3>Getting Started</h3>
 
             <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 20px;">
                 <strong>⚠️ Security Notice:</strong> Always verify URLs before visiting. Double-check that links match the official websites and use secure connections (HTTPS). Be cautious of phishing attempts.
             </div>
 
             <ol>
-                <li><strong>Install Wander Wallet:</strong> Get the browser extension from <a href="https://wander.app" target="_blank">wander.app</a></li>
-                <li><strong>Create or Import Wallet:</strong> Set up a new Arweave wallet or import an existing one</li>
-                <li><strong>Fund Your Wallet:</strong> Purchase AR tokens from exchanges like:
+                <li><strong>Choose a wallet provider:</strong> Use the General Settings tab to choose EVM/Base USDC x402 or the advanced Wander/AR path.</li>
+                <li><strong>Install a wallet:</strong> For EVM, use MetaMask, Rabby, Brave Wallet, or another EIP-1193 wallet. For AR, install Wander from <a href="https://wander.app" target="_blank">wander.app</a>.</li>
+                <li><strong>Fund Your Wallet:</strong> EVM uploads need Base USDC when Turbo quotes payment. AR uploads need AR from exchanges like:
                     <ul style="margin-top: 5px;">
                         <li><a href="https://www.binance.com" target="_blank">Binance</a></li>
                         <li><a href="https://www.coinbase.com" target="_blank">Coinbase</a></li>
                         <li><a href="https://www.kraken.com" target="_blank">Kraken</a></li>
                     </ul>
                 </li>
-                <li><strong>Connect Above:</strong> Click "Connect Wallet" to link your wallet to this site</li>
+                <li><strong>Connect Above:</strong> Click "Connect Wallet" to link your wallet to this site.</li>
             </ol>
             
             <div class="clkt-info-box" style="background: #fff4e5; border-color: #ffb900; margin-top: 20px;">
                 <h4>💡 Cost Information</h4>
-                <p><strong>Storage Cost:</strong> Approximately $0.001 per MB for permanent storage</p>
+                <p><strong>Storage Cost:</strong> Turbo quotes payment when a resource is not eligible for free bundling.</p>
                 <p><strong>Example Costs:</strong></p>
                 <ul style="margin-top: 5px;">
                     <li>Blog post (text only): < $0.001</li>
                     <li>Post with 5 images (5MB): ~$0.005</li>
                     <li>Photo gallery (50MB): ~$0.05</li>
                 </ul>
-                <p style="margin-top: 10px;"><em>All content is stored permanently on the Arweave blockchain.</em></p>
+                <p style="margin-top: 10px;"><em>Public uploads are stored permanently on Arweave and can be indexed via Arweave GraphQL tags.</em></p>
             </div>
         </div>
     </form>
@@ -464,7 +500,7 @@ function clkt_render_bulk_upload_tab() {
     <!-- Filter controls (used by both old and new UI) -->
     <div class="clkt-bulk-filters" style="background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; padding: 20px; margin-bottom: 20px;">
         <h3 style="margin-top: 0;">📦 Bulk Upload to Permaweb</h3>
-        <p style="margin-bottom: 20px; color: #666;">Upload multiple posts to Arweave at once. Choose whether to upload only new/changed content or force re-upload of all posts.</p>
+        <p style="margin-bottom: 20px; color: #666;">Upload multiple posts to Arweave at once using the selected wallet provider. Choose whether to upload only new/changed content or force re-upload of all posts.</p>
 
         <div class="clkt-filter-row" style="display: flex; gap: 15px; align-items: flex-end; margin-bottom: 15px;">
             <div class="clkt-filter-item" style="flex: 1;">
@@ -499,7 +535,7 @@ function clkt_render_bulk_upload_tab() {
     <!-- Wallet Warning -->
     <div id="clkt-bulk-wallet-warning" style="display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 15px; margin-bottom: 20px; color: #856404;">
         <strong>⚠️ No Wallet Connected</strong>
-        <p style="margin: 8px 0 0 0;">You need to connect an Arweave wallet to upload content. Please go to the <a href="?page=clkt-settings&tab=wallet" style="color: #0073aa;">Wallet Settings</a> tab to connect your wallet.</p>
+        <p style="margin: 8px 0 0 0;">You need to connect a browser wallet to upload content. Please go to the <a href="?page=clkt-settings&tab=wallet" style="color: #0073aa;">Wallet Settings</a> tab to connect your wallet.</p>
     </div>
 
     <!-- Test Mode Banner (Persistent) -->
@@ -510,7 +546,7 @@ function clkt_render_bulk_upload_tab() {
             <div>
                 <strong style="color: #1d2327; font-size: 13px; display: block; margin-bottom: 4px;">Test Mode Active</strong>
                 <p style="margin: 0; font-size: 12px; color: #646970; line-height: 1.5;">
-                    Uploads will be simulated - no AR will be spent. Arweave view links are disabled in test mode.
+                    Uploads will be simulated - no wallet payment will be signed. Arweave view links are disabled in test mode.
                 </p>
             </div>
         </div>
