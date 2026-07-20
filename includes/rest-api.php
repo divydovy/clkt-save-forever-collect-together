@@ -279,17 +279,25 @@ function clkt_rest_store_tx($post_id, $tx_id, $content_hash = '', $status = 'upl
         $versions = array();
     }
     $post = get_post($post_id);
-    $versions[] = array(
-        'tx_id'         => $tx_id,
-        'arweave_url'   => 'https://arweave.net/' . $tx_id,
-        'timestamp'     => time(),
-        'content_hash'  => $content_hash,
-        'wp_revision_id'=> $post_id,
-        'post_title'    => $post ? $post->post_title : '',
-        'post_modified' => $post ? $post->post_modified : current_time('mysql'),
-        'via'           => 'rest-api',
-    );
-    update_post_meta($post_id, '_clkt_arweave_versions', $versions);
+    // Idempotent: only append a version the first time we see this tx id, so
+    // a re-save (e.g. to re-verify a pending tx) updates status without dupes.
+    $already = false;
+    foreach ($versions as $v) {
+        if (isset($v['tx_id']) && $v['tx_id'] === $tx_id) { $already = true; break; }
+    }
+    if (!$already) {
+        $versions[] = array(
+            'tx_id'         => $tx_id,
+            'arweave_url'   => 'https://arweave.net/' . $tx_id,
+            'timestamp'     => time(),
+            'content_hash'  => $content_hash,
+            'wp_revision_id'=> $post_id,
+            'post_title'    => $post ? $post->post_title : '',
+            'post_modified' => $post ? $post->post_modified : current_time('mysql'),
+            'via'           => 'rest-api',
+        );
+        update_post_meta($post_id, '_clkt_arweave_versions', $versions);
+    }
     update_post_meta($post_id, '_clkt_current_tx_id', $tx_id);
     update_post_meta($post_id, '_clkt_arweave_status', $status);
     update_post_meta($post_id, '_clkt_upload_timestamp', time());
