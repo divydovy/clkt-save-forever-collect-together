@@ -14,7 +14,7 @@ function clkt_is_test_transaction($tx_id)
 // Helper function to check if test mode is currently enabled
 function clkt_is_test_mode_enabled()
 {
-    return get_option('clkt_test_mode_enabled', false);
+    return get_option('clkt_test_mode', false);
 }
 
 // Add Permaweb integration fields to post edit screen
@@ -24,7 +24,7 @@ function clkt_permaweb_meta_box()
         'clkt_permaweb_meta_box',
         'CLKT - Save Forever',
         __NAMESPACE__ . '\\clkt_permaweb_meta_box_callback',
-        'post',
+        clkt_get_supported_post_types(),
         'side',
         'high',
         null
@@ -108,6 +108,7 @@ function clkt_get_post_data($post_id)
             'metadata' => [
                 'domain' => wp_parse_url(get_site_url(), PHP_URL_HOST),
                 'postId' => $post->ID,
+                'postType' => $post->post_type,
                 'permalink' => get_permalink($post->ID),
                 'publishedAt' => get_post_time('c', true, $post->ID),
                 'modifiedAt' => get_post_modified_time('c', true, $post->ID),
@@ -163,6 +164,16 @@ function clkt_permaweb_meta_box_callback($post)
     $encrypt_content = get_post_meta($post->ID, '_clkt_encrypt_content', true);
     $encryption_method = get_post_meta($post->ID, '_clkt_encryption_method', true);
     $per_post_password = get_post_meta($post->ID, '_clkt_per_post_password', true);
+
+    // Get attribution settings
+    $license = get_post_meta($post->ID, '_clkt_license', true);
+    if (!is_array($license)) {
+        $license = array();
+    }
+    $derived_from = get_post_meta($post->ID, '_clkt_derived_from', true);
+    if (!is_array($derived_from)) {
+        $derived_from = array();
+    }
 
     // Convert encrypt_content to boolean for proper checking
     $encrypt_content = ($encrypt_content === '1' || $encrypt_content === 1 || $encrypt_content === true);
@@ -296,42 +307,6 @@ function clkt_permaweb_meta_box_callback($post)
         $version_timeline[] = $revision_data;
         $version_num--;
     }
-
-    // Add orphaned Arweave uploads (those without wp_revision_count)
-    // These are from before we started tracking revision numbers
-    // Also filter by test mode
-    $orphaned_uploads = [];
-    foreach ($versions as $version) {
-        if (!isset($version['wp_revision_count'])) {
-            $tx_id = isset($version['arweave_url']) ?
-                basename($version['arweave_url']) :
-                (isset($version['id']) ? $version['id'] : null);
-
-            if ($tx_id) {
-                $is_test_tx = clkt_is_test_transaction($tx_id);
-
-                // Only include if mode matches
-                if ($test_mode_enabled === $is_test_tx) {
-                    $orphaned_uploads[] = [
-                        'wp_version' => '?',
-                        'date' => isset($version['timestamp']) ?
-                            gmdate('Y-m-d H:i', $version['timestamp']) :
-                            'Date unknown',
-                        'is_current' => false,
-                        'arweave_status' => 'uploaded',
-                        'transaction_id' => $tx_id,
-                        'confirmation_status' => isset($version['confirmation_status']) ?
-                            $version['confirmation_status'] : 'confirmed',
-                        'is_orphaned' => true,
-                        'post_title' => $version['post_title'] ?? 'Unknown title'
-                    ];
-                }
-            }
-        }
-    }
-
-    // Add orphaned uploads at the end
-    $version_timeline = array_merge($version_timeline, $orphaned_uploads);
 
     ?>
     <div class="clkt-permaweb-container" data-post-id="<?php echo esc_attr($post->ID); ?>">
@@ -538,14 +513,90 @@ function clkt_permaweb_meta_box_callback($post)
                             </div>
 
                         </div>
+
+                        <!-- Attribution heading -->
+                        <div
+                            style="font-size: 11px; font-weight: 600; color: #6b7280; margin-top: 12px; margin-bottom: 6px; text-align: left; text-transform: uppercase; letter-spacing: 0.5px;">
+                            Attribution</div>
+
+                        <!-- License -->
+                        <div class="clkt-setting-row">
+                            <div class="clkt-setting-label">
+                                <label for="clkt-license-spdx">License</label>
+                            </div>
+                            <select class="clkt-select" id="clkt-license-spdx"
+                                data-post-id="<?php echo esc_attr($post->ID); ?>">
+                                <option value="" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', ''); ?>>None</option>
+                                <option value="CC-BY-4.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'CC-BY-4.0'); ?>>CC BY 4.0</option>
+                                <option value="CC-BY-SA-4.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'CC-BY-SA-4.0'); ?>>CC BY-SA 4.0</option>
+                                <option value="CC-BY-NC-4.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'CC-BY-NC-4.0'); ?>>CC BY-NC 4.0</option>
+                                <option value="CC-BY-NC-SA-4.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'CC-BY-NC-SA-4.0'); ?>>CC BY-NC-SA 4.0</option>
+                                <option value="CC0-1.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'CC0-1.0'); ?>>CC0 1.0</option>
+                                <option value="MIT" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'MIT'); ?>>MIT</option>
+                                <option value="Apache-2.0" <?php selected(isset($license['spdx']) ? $license['spdx'] : '', 'Apache-2.0'); ?>>Apache 2.0</option>
+                                <option value="custom" <?php
+                                    $known = array('', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'CC-BY-NC-4.0', 'CC-BY-NC-SA-4.0', 'CC0-1.0', 'MIT', 'Apache-2.0');
+                                    $current_spdx = isset($license['spdx']) ? $license['spdx'] : '';
+                                    if ($current_spdx && !in_array($current_spdx, $known)) echo 'selected';
+                                ?>>Custom...</option>
+                            </select>
+                        </div>
+
+                        <!-- Custom SPDX input (shown when custom is selected) -->
+                        <?php
+                        $is_custom = ($current_spdx && !in_array($current_spdx, $known));
+                        ?>
+                        <div id="clkt-license-custom-container" style="display: <?php echo $is_custom ? 'block' : 'none'; ?>; margin-bottom: 8px;">
+                            <input type="text" id="clkt-license-custom-spdx" class="clkt-text-input"
+                                placeholder="SPDX identifier (e.g. GPL-3.0-only)"
+                                value="<?php echo esc_attr($is_custom ? $current_spdx : ''); ?>">
+                        </div>
+
+                        <!-- License URL (auto-filled, editable) -->
+                        <div id="clkt-license-url-container" style="display: <?php echo $current_spdx ? 'block' : 'none'; ?>; margin-bottom: 8px;">
+                            <input type="url" id="clkt-license-url" class="clkt-text-input"
+                                placeholder="License URL"
+                                value="<?php echo esc_attr(isset($license['url']) ? $license['url'] : ''); ?>">
+                        </div>
+
+                        <!-- License note -->
+                        <div id="clkt-license-note-container" style="display: <?php echo $current_spdx ? 'block' : 'none'; ?>; margin-bottom: 8px;">
+                            <input type="text" id="clkt-license-note" class="clkt-text-input"
+                                placeholder="Note (e.g. Attribution required)"
+                                value="<?php echo esc_attr(isset($license['note']) ? $license['note'] : ''); ?>">
+                        </div>
+
+                        <!-- Derived From -->
+                        <div style="font-size: 11px; font-weight: 600; color: #6b7280; margin-top: 8px; margin-bottom: 6px; text-align: left; text-transform: uppercase; letter-spacing: 0.5px;">
+                            Derived From</div>
+
+                        <div id="clkt-derived-from-list" data-post-id="<?php echo esc_attr($post->ID); ?>">
+                            <?php if (!empty($derived_from)): ?>
+                                <?php foreach ($derived_from as $i => $ref): ?>
+                                    <div class="clkt-derived-entry" data-index="<?php echo esc_attr($i); ?>">
+                                        <div class="clkt-derived-entry-header">
+                                            <select class="clkt-select clkt-derived-relationship">
+                                                <option value="citation" <?php selected(isset($ref['relationship']) ? $ref['relationship'] : '', 'citation'); ?>>Citation</option>
+                                                <option value="response" <?php selected(isset($ref['relationship']) ? $ref['relationship'] : '', 'response'); ?>>Response</option>
+                                                <option value="translation" <?php selected(isset($ref['relationship']) ? $ref['relationship'] : '', 'translation'); ?>>Translation</option>
+                                                <option value="remix" <?php selected(isset($ref['relationship']) ? $ref['relationship'] : '', 'remix'); ?>>Remix</option>
+                                                <option value="fork" <?php selected(isset($ref['relationship']) ? $ref['relationship'] : '', 'fork'); ?>>Fork</option>
+                                            </select>
+                                            <button type="button" class="clkt-derived-remove" title="Remove">&times;</button>
+                                        </div>
+                                        <input type="text" class="clkt-text-input clkt-derived-title" placeholder="Title" value="<?php echo esc_attr(isset($ref['title']) ? $ref['title'] : ''); ?>">
+                                        <input type="text" class="clkt-text-input clkt-derived-author" placeholder="Author" value="<?php echo esc_attr(isset($ref['author']) ? $ref['author'] : ''); ?>">
+                                        <input type="text" class="clkt-text-input clkt-derived-url" placeholder="URL" value="<?php echo esc_attr(isset($ref['url']) ? $ref['url'] : ''); ?>">
+                                        <input type="text" class="clkt-text-input clkt-derived-txid" placeholder="Arweave TX ID (optional)" value="<?php echo esc_attr(isset($ref['txId']) ? $ref['txId'] : ''); ?>">
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                        <button type="button" class="button clkt-derived-add" style="width: 100%; margin-top: 4px; font-size: 12px;">+ Add reference</button>
+
                     </div>
                     <!-- End collapsible settings content -->
                 </div>
-
-                <?php
-                // Legacy sidebar button removed - all uploads now go through UploadManager (in meta boxes below editor)
-                // This eliminates confusion between two competing upload buttons
-                ?>
 
             </div>
 
@@ -597,6 +648,7 @@ function clkt_permaweb_meta_box_callback($post)
                                                 </svg>
                                             </a>
                                         <?php endif; ?>
+                                        <?php echo wp_kses_post(\clkt_render_restore_proof_button($post->ID, $current_item['transaction_id'])); ?>
                                     </div>
                                 <?php else: ?>
                                     <div class="clkt-timeline-status">
@@ -640,19 +692,11 @@ function clkt_permaweb_meta_box_callback($post)
                                     echo $item['is_current'] ? 'current' :
                                         ($item['arweave_status'] === 'uploaded' ? 'uploaded' : 'not-uploaded');
                                     ?>">
-                                        <?php echo isset($item['is_orphaned']) ? '❓' : esc_html( $item['wp_version'] ); ?>
+                                        <?php echo esc_html( $item['wp_version'] ); ?>
                                     </div>
                                     <div class="clkt-timeline-details">
                                         <div class="clkt-timeline-version">
-                                            <?php if (isset($item['is_orphaned'])): ?>
-                                                Legacy Upload
-                                                <?php if (isset($item['post_title']) && $item['post_title']): ?>
-                                                    <span
-                                                        style="font-size: 11px; color: #888;">(<?php echo esc_html($item['post_title']); ?>)</span>
-                                                <?php endif; ?>
-                                            <?php else: ?>
-                                                Version <?php echo esc_html( $item['wp_version'] ); ?>
-                                            <?php endif; ?>
+                                            Version <?php echo esc_html( $item['wp_version'] ); ?>
                                             <?php if ($item['is_current']): ?>
                                                 <span style="color: #8b5cf6;"> (Current)</span>
                                             <?php endif; ?>
@@ -679,6 +723,7 @@ function clkt_permaweb_meta_box_callback($post)
                                                         </svg>
                                                     </a>
                                                 <?php endif; ?>
+                                                <?php echo wp_kses_post(\clkt_render_restore_proof_button($post->ID, $item['transaction_id'])); ?>
                                             </div>
                                             <?php if ($item['transaction_id']): ?>
                                                 <div class="clkt-timeline-tx">
@@ -704,6 +749,7 @@ function clkt_permaweb_meta_box_callback($post)
         <!-- Hidden fields for JavaScript -->
         <input type="hidden" id="clkt-global-auto-save" value="<?php echo $global_auto_save ? '1' : '0'; ?>">
         <input type="hidden" id="clkt-post-id" value="<?php echo esc_attr($post->ID); ?>">
+        <div id="clkt-restore-proof-panel" class="clkt-restore-proof-panel" hidden></div>
 
     </div>
     <?php
@@ -713,6 +759,10 @@ function clkt_permaweb_meta_box_callback($post)
 function clkt_enqueue_metabox_assets($hook)
 {
     if ($hook !== 'post.php' && $hook !== 'post-new.php') {
+        return;
+    }
+
+    if (!clkt_is_supported_post_type(clkt_get_current_admin_post_type())) {
         return;
     }
 

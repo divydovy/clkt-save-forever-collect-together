@@ -501,12 +501,92 @@ a.clkt-status:hover {
     margin: 16px 0;
 }
 
+.clkt-record-receipts {
+    margin: 16px 0;
+    padding: 14px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.clkt-record-receipts h4 {
+    margin: 0 0 12px 0;
+    font-size: 1em;
+    color: #1d2327;
+}
+
+.clkt-record-receipt {
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.clkt-record-receipt + .clkt-record-receipt {
+    margin-top: 10px;
+}
+
+.clkt-record-receipt__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.clkt-record-receipt__title {
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.clkt-record-receipt__schema {
+    margin-top: 2px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #646970;
+}
+
+.clkt-record-receipt__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    margin: 0;
+}
+
+.clkt-record-receipt__field {
+    min-width: 0;
+}
+
+.clkt-record-receipt__field dt {
+    margin: 0 0 2px 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: #646970;
+    text-transform: uppercase;
+}
+
+.clkt-record-receipt__field dd {
+    margin: 0;
+    color: #1d2327;
+    font-family: monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .clkt-results__actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 16px;
     padding-top: 16px;
     border-top: 1px solid #ddd;
+}
+
+.clkt-results__actions .clkt-btn {
+    flex: 1 1 140px;
 }
 
 /* ============================================
@@ -604,6 +684,14 @@ a.clkt-status:hover {
     .clkt-preview__actions,
     .clkt-results__actions {
         flex-direction: column;
+    }
+
+    .clkt-record-receipt__header {
+        flex-direction: column;
+    }
+
+    .clkt-record-receipt__grid {
+        grid-template-columns: 1fr;
     }
 
     .clkt-btn {

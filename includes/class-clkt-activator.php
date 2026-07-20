@@ -83,12 +83,15 @@ class CLKT_Activator {
             add_option('clkt_settings', $defaults);
         }
         
-        // Set wallet configuration defaults for initial_release branch
+        // Set wallet configuration defaults.
         if (!get_option('clkt_wallet_type')) {
             add_option('clkt_wallet_type', 'self'); // Default to self-managed wallet
         }
         if (!get_option('clkt_wallet_provider')) {
-            add_option('clkt_wallet_provider', 'wander');
+            add_option('clkt_wallet_provider', 'evm');
+        }
+        if (!get_option('clkt_x402_spend_cap_microusdc')) {
+            add_option('clkt_x402_spend_cap_microusdc', 100000);
         }
         if (!get_option('clkt_show_cost_estimate')) {
             add_option('clkt_show_cost_estimate', '1');
@@ -101,4 +104,4 @@ class CLKT_Activator {
             add_option('clkt_free_dispatch_limit_kb', 100);
         }
     }
-} 
+}
