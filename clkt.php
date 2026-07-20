@@ -4,7 +4,7 @@
  * Plugin Name: CLKT - Save Forever, Collect Together
  * Plugin URI: https://getclkt.com
  * Description: Your content deserves to outlive your website. CLKT permanently preserves your WordPress posts and media on the decentralized web. One click, saved forever. No recurring fees, no expiration dates.
- * Version: 1.2.0
+ * Version: 1.2.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: David Lockie
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('CLKT_VERSION', '1.2.0');
+define('CLKT_VERSION', '1.2.1');
 define('CLKT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('CLKT_PLUGIN_URL', plugin_dir_url(__FILE__));
 
