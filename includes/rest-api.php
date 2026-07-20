@@ -2,18 +2,25 @@
 /**
  * CLKT REST API — headless / agent-driveable Save Forever.
  *
- * Exposes the plugin's save flow over REST so it can be driven without the
- * admin browser (e.g. by automation, CI, or an agent) using an application
- * password. Signing/dispatch is delegated to a pluggable dispatcher via the
- * `clkt_dispatch_record` filter, because WordPress.com Atomic cannot sign
- * ANS-104 data items itself — a small hosted signing service holds the key
- * and does the Turbo dispatch. See clkt_default_dispatch_record() below.
+ * Design principle: the plugin NEVER holds a key and NEVER signs content.
+ * Signing happens remotely, in the caller's own wallet — exactly like the
+ * browser flow, where the visitor's own wallet signs and JS then posts the
+ * resulting tx id to be recorded. This endpoint is the headless equivalent:
+ * the caller (agent / CI / script) signs + dispatches with THEIR OWN wallet,
+ * then registers the tx id here. So liability for what gets saved stays with
+ * the signer, never with CLKT.
  *
- * Routes (namespace clkt/v1):
- *   GET  /health           — plugin version + whether a dispatcher is configured
- *   POST /save/<id>        — build record, dispatch, persist tx (needs edit_post)
- *   GET  /status/<id>      — current tx id / status / versions for a post
- *   GET  /records          — list posts that have been clkt'd
+ * Typical flow:
+ *   1. GET  /clkt/v1/prepare/<id>  -> canonical record + tags + content hash
+ *   2. caller signs those + dispatches to Arweave with their own wallet
+ *   3. POST /clkt/v1/save/<id>     -> { tx_id } ; plugin verifies + records
+ *
+ * Routes (namespace clkt/v1, auth via application password + edit_post cap):
+ *   GET  /health           plugin version + verification mode
+ *   GET  /prepare/<id>      canonical record + tags to sign (deterministic)
+ *   POST /save/<id>         register a caller-signed tx id ({ tx_id })
+ *   GET  /status/<id>       current tx id / status / versions
+ *   GET  /records           posts that have been clkt'd
  *
  * @package CLKT
  * @since   1.2.0
@@ -31,36 +38,34 @@ function clkt_register_rest_routes() {
     register_rest_route($ns, '/health', array(
         'methods'             => 'GET',
         'callback'            => 'clkt_rest_health',
-        'permission_callback' => function () {
-            return current_user_can('edit_posts');
-        },
+        'permission_callback' => function () { return current_user_can('edit_posts'); },
+    ));
+
+    register_rest_route($ns, '/prepare/(?P<id>\d+)', array(
+        'methods'             => 'GET',
+        'callback'            => 'clkt_rest_prepare',
+        'permission_callback' => function ($request) { return current_user_can('edit_post', (int) $request['id']); },
     ));
 
     register_rest_route($ns, '/save/(?P<id>\d+)', array(
         'methods'             => 'POST',
         'callback'            => 'clkt_rest_save',
-        'permission_callback' => function ($request) {
-            return current_user_can('edit_post', (int) $request['id']);
-        },
+        'permission_callback' => function ($request) { return current_user_can('edit_post', (int) $request['id']); },
         'args'                => array(
-            'id' => array('validate_callback' => function ($v) { return is_numeric($v); }),
+            'tx_id' => array('required' => true, 'type' => 'string'),
         ),
     ));
 
     register_rest_route($ns, '/status/(?P<id>\d+)', array(
         'methods'             => 'GET',
         'callback'            => 'clkt_rest_status',
-        'permission_callback' => function ($request) {
-            return current_user_can('edit_post', (int) $request['id']);
-        },
+        'permission_callback' => function ($request) { return current_user_can('edit_post', (int) $request['id']); },
     ));
 
     register_rest_route($ns, '/records', array(
         'methods'             => 'GET',
         'callback'            => 'clkt_rest_records',
-        'permission_callback' => function () {
-            return current_user_can('edit_posts');
-        },
+        'permission_callback' => function () { return current_user_can('edit_posts'); },
     ));
 }
 
@@ -69,52 +74,74 @@ function clkt_register_rest_routes() {
  */
 function clkt_rest_health() {
     return rest_ensure_response(array(
-        'plugin'                => 'clkt',
-        'version'               => defined('CLKT_VERSION') ? CLKT_VERSION : null,
-        'dispatcher_configured' => clkt_has_dispatcher(),
-        'site'                  => home_url(),
+        'plugin'  => 'clkt',
+        'version' => defined('CLKT_VERSION') ? CLKT_VERSION : null,
+        'site'    => home_url(),
+        // Plugin never signs: signing is done remotely by the caller's wallet.
+        'signing' => 'caller-side',
+        'verify'  => (bool) apply_filters('clkt_rest_verify_onchain', true),
     ));
 }
 
 /**
- * POST /save/<id> — the headless Save Forever.
+ * GET /prepare/<id> — canonical record + tags the caller should sign.
+ * Deterministic so the caller can build a byte-identical record.
+ */
+function clkt_rest_prepare(WP_REST_Request $request) {
+    $post = get_post((int) $request['id']);
+    if (!$post || $post->post_status !== 'publish') {
+        return new WP_Error('clkt_not_publishable', 'Post not found or not published.', array('status' => 404));
+    }
+    $built = clkt_rest_build_record($post);
+    return rest_ensure_response(array(
+        'post_id'      => $post->ID,
+        'record'       => $built['record'],
+        'tags'         => $built['tags'],
+        'content_hash' => $built['content_hash'],
+    ));
+}
+
+/**
+ * POST /save/<id> — register a tx the caller already signed + dispatched.
+ * The plugin does NOT sign; it verifies the tx belongs to this post/site and
+ * records it (same post-meta as the browser flow, so the badge works).
  */
 function clkt_rest_save(WP_REST_Request $request) {
     $post_id = (int) $request['id'];
+    $tx_id   = sanitize_text_field((string) $request->get_param('tx_id'));
     $post    = get_post($post_id);
 
     if (!$post || $post->post_status !== 'publish') {
         return new WP_Error('clkt_not_publishable', 'Post not found or not published.', array('status' => 404));
     }
-    if (!clkt_has_dispatcher()) {
-        return new WP_Error(
-            'clkt_no_dispatcher',
-            'No dispatcher configured. Set the CLKT signing-service URL/secret (options clkt_dispatch_service_url + clkt_dispatch_service_secret) or hook the clkt_dispatch_record filter.',
-            array('status' => 501)
-        );
+    if (!preg_match('/^[A-Za-z0-9_-]{43}$/', $tx_id)) {
+        return new WP_Error('clkt_bad_txid', 'tx_id is not a valid Arweave transaction id.', array('status' => 400));
     }
 
-    $built  = clkt_rest_build_record($post);
-    $record = $built['record'];
-    $tags   = $built['tags'];
-
-    // Delegate signing + Turbo dispatch to the configured dispatcher.
-    $result = apply_filters('clkt_dispatch_record', null, $record, $tags, $post_id);
-
-    if (is_wp_error($result)) {
-        return $result;
+    // Best-effort on-chain verification: confirm the tx is a CLKT record for
+    // THIS post + site. Skipped gracefully if not yet indexed (propagation lag)
+    // so we mark it pending rather than reject a legitimate just-dispatched tx.
+    $verify = apply_filters('clkt_rest_verify_onchain', true);
+    $status = 'uploaded';
+    if ($verify) {
+        $check = clkt_rest_verify_tx($tx_id, $post_id);
+        if (is_wp_error($check)) {
+            return $check; // definitively wrong (mismatched post/site/app)
+        }
+        if ($check === 'pending') {
+            $status = 'pending_confirmation';
+        }
     }
-    if (empty($result) || empty($result['tx_id'])) {
-        return new WP_Error('clkt_dispatch_failed', 'Dispatcher returned no transaction id.', array('status' => 502));
-    }
 
-    clkt_rest_store_tx($post_id, $result['tx_id'], $built['content_hash']);
+    $content_hash = sanitize_text_field((string) $request->get_param('content_hash'));
+    clkt_rest_store_tx($post_id, $tx_id, $content_hash, $status);
 
     return rest_ensure_response(array(
         'success'     => true,
         'post_id'     => $post_id,
-        'tx_id'       => $result['tx_id'],
-        'arweave_url' => 'https://arweave.net/' . $result['tx_id'],
+        'tx_id'       => $tx_id,
+        'status'      => $status,
+        'arweave_url' => 'https://arweave.net/' . $tx_id,
     ));
 }
 
@@ -133,7 +160,7 @@ function clkt_rest_status(WP_REST_Request $request) {
 }
 
 /**
- * GET /records — posts that have a current tx id.
+ * GET /records
  */
 function clkt_rest_records(WP_REST_Request $request) {
     $q = new WP_Query(array(
@@ -160,25 +187,12 @@ function clkt_rest_records(WP_REST_Request $request) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * True if something can sign+dispatch (a hosted service URL is set, or a
- * custom filter is hooked).
- */
-function clkt_has_dispatcher() {
-    if (has_filter('clkt_dispatch_record')) {
-        return true;
-    }
-    return (bool) get_option('clkt_dispatch_service_url');
-}
-
-/**
  * Build the clkt-record-v1 envelope + tags for a post. Mirrors the schema the
- * browser bundle produces, so REST-dispatched records are indistinguishable
- * from UI ones.
+ * browser bundle produces, so a caller signing this makes an equivalent record.
  */
 function clkt_rest_build_record(WP_Post $post) {
-    $html   = apply_filters('the_content', $post->post_content);
-    $domain = wp_parse_url(home_url(), PHP_URL_HOST);
-    $now    = gmdate('c');
+    $html         = apply_filters('the_content', $post->post_content);
+    $domain       = wp_parse_url(home_url(), PHP_URL_HOST);
     $content_hash = hash('sha256', $html);
 
     $record = array(
@@ -194,7 +208,7 @@ function clkt_rest_build_record(WP_Post $post) {
             'slug'     => $post->post_name,
             'title'    => get_the_title($post),
         ),
-        'content' => array('contentType' => 'text/html', 'encoding' => 'utf-8', 'sha256' => $content_hash, 'html' => $html),
+        'content'    => array('contentType' => 'text/html', 'encoding' => 'utf-8', 'sha256' => $content_hash, 'html' => $html),
         'collection' => array('id' => 'wordpress-site:' . $domain),
         'restore'    => array('manifest' => 'embedded'),
     );
@@ -213,17 +227,53 @@ function clkt_rest_build_record(WP_Post $post) {
         array('name' => 'WordPress-Post-Type', 'value' => $post->post_type),
         array('name' => 'Collection-ID', 'value' => 'wordpress-site:' . $domain),
         array('name' => 'Content-Hash', 'value' => $content_hash),
-        array('name' => 'Updated-At', 'value' => $now),
     );
 
     return array('record' => $record, 'tags' => $tags, 'content_hash' => $content_hash);
 }
 
 /**
- * Persist a dispatched tx id onto the post — identical meta shape to the
- * browser save path (clkt_save_transaction), so the frontend badge works.
+ * Verify a submitted tx really is a CLKT record for this post + site, via the
+ * Arweave GraphQL index. Returns true (verified), 'pending' (not yet indexed),
+ * or WP_Error (definitively mismatched — reject).
  */
-function clkt_rest_store_tx($post_id, $tx_id, $content_hash = '') {
+function clkt_rest_verify_tx($tx_id, $post_id) {
+    $domain = wp_parse_url(home_url(), PHP_URL_HOST);
+    $query  = '{ transaction(id: "' . $tx_id . '") { tags { name value } } }';
+    $resp   = wp_remote_post('https://arweave-search.goldsky.com/graphql', array(
+        'timeout' => 20,
+        'headers' => array('Content-Type' => 'application/json'),
+        'body'    => wp_json_encode(array('query' => $query)),
+    ));
+    if (is_wp_error($resp)) {
+        return 'pending'; // can't reach index; don't block, mark pending
+    }
+    $data = json_decode(wp_remote_retrieve_body($resp), true);
+    $tx   = isset($data['data']['transaction']) ? $data['data']['transaction'] : null;
+    if (empty($tx) || empty($tx['tags'])) {
+        return 'pending'; // not indexed yet (propagation lag)
+    }
+    $tags = array();
+    foreach ($tx['tags'] as $t) {
+        $tags[$t['name']] = $t['value'];
+    }
+    if (($tags['App-Name'] ?? '') !== 'CLKT') {
+        return new WP_Error('clkt_verify_failed', 'Transaction is not a CLKT record.', array('status' => 422));
+    }
+    if ((string) ($tags['WordPress-Post-ID'] ?? '') !== (string) $post_id) {
+        return new WP_Error('clkt_verify_failed', 'Transaction post id does not match.', array('status' => 422));
+    }
+    if (($tags['Source-Domain'] ?? '') !== $domain) {
+        return new WP_Error('clkt_verify_failed', 'Transaction is for a different site.', array('status' => 422));
+    }
+    return true;
+}
+
+/**
+ * Persist a tx id onto the post — identical meta shape to the browser save path
+ * (clkt_save_transaction), so the frontend badge works.
+ */
+function clkt_rest_store_tx($post_id, $tx_id, $content_hash = '', $status = 'uploaded') {
     $versions = get_post_meta($post_id, '_clkt_arweave_versions', true);
     if (!is_array($versions)) {
         $versions = array();
@@ -241,42 +291,7 @@ function clkt_rest_store_tx($post_id, $tx_id, $content_hash = '') {
     );
     update_post_meta($post_id, '_clkt_arweave_versions', $versions);
     update_post_meta($post_id, '_clkt_current_tx_id', $tx_id);
-    update_post_meta($post_id, '_clkt_arweave_status', 'uploaded');
+    update_post_meta($post_id, '_clkt_arweave_status', $status);
     update_post_meta($post_id, '_clkt_upload_timestamp', time());
     update_post_meta($post_id, '_clkt_arweave_url', 'https://arweave.net/' . $tx_id);
-}
-
-/**
- * Default dispatcher: POST the record + tags to a hosted signing service that
- * holds the EVM key and dispatches via Turbo (free <100KB). Configure with:
- *   update_option('clkt_dispatch_service_url', 'https://app.getclkt.com/api/dispatch');
- *   update_option('clkt_dispatch_service_secret', '<shared secret>');
- * Returns array('tx_id' => ...) or WP_Error. Only active when a URL is set.
- */
-add_filter('clkt_dispatch_record', 'clkt_default_dispatch_record', 10, 4);
-function clkt_default_dispatch_record($result, $record, $tags, $post_id) {
-    if (!empty($result)) {
-        return $result; // another handler already dispatched
-    }
-    $url = get_option('clkt_dispatch_service_url');
-    if (!$url) {
-        return $result; // not configured; clkt_has_dispatcher() stays false
-    }
-    $resp = wp_remote_post($url, array(
-        'timeout' => 60,
-        'headers' => array(
-            'Content-Type'      => 'application/json',
-            'X-CLKT-Secret'     => (string) get_option('clkt_dispatch_service_secret', ''),
-        ),
-        'body'    => wp_json_encode(array('record' => $record, 'tags' => $tags, 'postId' => $post_id)),
-    ));
-    if (is_wp_error($resp)) {
-        return $resp;
-    }
-    $code = wp_remote_retrieve_response_code($resp);
-    $data = json_decode(wp_remote_retrieve_body($resp), true);
-    if ($code < 200 || $code >= 300 || empty($data['tx_id'])) {
-        return new WP_Error('clkt_service_error', 'Signing service error (HTTP ' . $code . ').', array('status' => 502, 'body' => $data));
-    }
-    return array('tx_id' => $data['tx_id']);
 }
