@@ -67,6 +67,12 @@ function clkt_register_rest_routes() {
         'callback'            => 'clkt_rest_records',
         'permission_callback' => function () { return current_user_can('edit_posts'); },
     ));
+
+    register_rest_route($ns, '/auto-save-queue', array(
+        'methods'             => 'GET',
+        'callback'            => 'clkt_rest_auto_save_queue',
+        'permission_callback' => function () { return current_user_can('edit_posts'); },
+    ));
 }
 
 /**
@@ -302,4 +308,47 @@ function clkt_rest_store_tx($post_id, $tx_id, $content_hash = '', $status = 'upl
     update_post_meta($post_id, '_clkt_arweave_status', $status);
     update_post_meta($post_id, '_clkt_upload_timestamp', time());
     update_post_meta($post_id, '_clkt_arweave_url', 'https://arweave.net/' . $tx_id);
+}
+
+/**
+ * GET /auto-save-queue — published posts that SHOULD be auto-saved per the
+ * site's OWN settings (global auto-save + per-post always/never/default) but
+ * don't have a current Arweave tx yet. Lets an external signer auto-clkt posts
+ * on publish while fully respecting the site's CLKT auto-save configuration.
+ */
+function clkt_rest_auto_save_queue(WP_REST_Request $request) {
+    $types = apply_filters('clkt_supported_post_types', array('post'));
+    $q = new WP_Query(array(
+        'post_type'      => $types,
+        'post_status'    => 'publish',
+        'posts_per_page' => (int) ($request['per_page'] ?: 100),
+        'fields'         => 'ids',
+    ));
+    $out = array();
+    foreach ($q->posts as $pid) {
+        if (get_post_meta($pid, '_clkt_current_tx_id', true)) {
+            continue; // already saved
+        }
+        if (!clkt_should_autosave($pid)) {
+            continue; // site settings say don't auto-save this one
+        }
+        $out[] = array('post_id' => $pid, 'title' => get_the_title($pid));
+    }
+    return rest_ensure_response($out);
+}
+
+/**
+ * Mirror of the auto-upload decision in clkt_handle_auto_upload(): the per-post
+ * setting wins (always/never); otherwise fall back to the global toggle.
+ * Keeps "respect settings" authoritative and inside the plugin.
+ */
+function clkt_should_autosave($post_id) {
+    $per_post = get_post_meta($post_id, '_clkt_per_post_save', true);
+    if ($per_post === 'always') {
+        return true;
+    }
+    if ($per_post === 'never') {
+        return false;
+    }
+    return (bool) get_option('clkt_global_auto_save', false);
 }
