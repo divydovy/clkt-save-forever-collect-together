@@ -3,7 +3,7 @@ Contributors: divydovy
 Tags: arweave, backup, decentralized, web3, permanent-storage
 Requires at least: 5.8
 Tested up to: 7.0
-Stable tag: 1.2.1
+Stable tag: 1.3.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -195,6 +195,9 @@ Part of the Arweave ecosystem, used for atomic asset registration. When content 
 * [AO / Arweave Privacy Policy](https://www.arweave.org/privacy)
 
 == Changelog ==
+
+= 1.3.0 =
+* Add clkt/v1 /auto-save-queue: lists posts that should auto-save per the site's own settings, so new posts can be preserved on publish (external signer) without the plugin holding a key.
 
 = 1.2.1 =
 * clkt/v1 /save is now idempotent: re-saving a tx re-verifies and updates status without duplicating versions.
