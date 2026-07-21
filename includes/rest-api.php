@@ -73,6 +73,20 @@ function clkt_register_rest_routes() {
         'callback'            => 'clkt_rest_auto_save_queue',
         'permission_callback' => function () { return current_user_can('edit_posts'); },
     ));
+
+    // Settings read/write — admin only (manage_options), whitelisted keys.
+    register_rest_route($ns, '/settings', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'clkt_rest_get_settings',
+            'permission_callback' => function () { return current_user_can('manage_options'); },
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'clkt_rest_update_settings',
+            'permission_callback' => function () { return current_user_can('manage_options'); },
+        ),
+    ));
 }
 
 /**
@@ -351,4 +365,67 @@ function clkt_should_autosave($post_id) {
         return false;
     }
     return (bool) get_option('clkt_global_auto_save', false);
+}
+
+/**
+ * Whitelist of CLKT settings the REST API may read/write, with sanitiser type.
+ * Only these keys are exposed — never arbitrary options.
+ */
+function clkt_rest_settings_schema() {
+    return array(
+        'clkt_global_auto_save'       => 'bool',
+        'clkt_show_cost_estimate'     => 'bool',
+        'clkt_free_dispatch_limit_kb' => 'int',
+        'clkt_max_allowed_upload_mb'  => 'int',
+        'clkt_wallet_type'            => 'text',
+        'clkt_wallet_provider'        => 'text',
+    );
+}
+
+/**
+ * GET /settings — current values of the whitelisted CLKT settings. (manage_options)
+ */
+function clkt_rest_get_settings() {
+    $out = array();
+    foreach (clkt_rest_settings_schema() as $key => $type) {
+        $out[$key] = get_option($key);
+    }
+    return rest_ensure_response($out);
+}
+
+/**
+ * POST /settings — update whitelisted CLKT settings. (manage_options)
+ * Unknown keys are ignored; values are sanitised by declared type.
+ */
+function clkt_rest_update_settings(WP_REST_Request $request) {
+    $schema = clkt_rest_settings_schema();
+    $params = $request->get_json_params();
+    if (!is_array($params)) {
+        $params = $request->get_params();
+    }
+    $updated = array();
+    foreach ($params as $key => $val) {
+        if (!isset($schema[$key])) {
+            continue; // whitelist only
+        }
+        switch ($schema[$key]) {
+            case 'bool':
+                $val = (bool) filter_var($val, FILTER_VALIDATE_BOOLEAN);
+                break;
+            case 'int':
+                $val = (int) $val;
+                break;
+            default:
+                $val = sanitize_text_field((string) $val);
+                break;
+        }
+        update_option($key, $val);
+        $updated[$key] = $val;
+    }
+    if (empty($updated)) {
+        return new WP_Error('clkt_no_settings',
+            'No known settings in request. Allowed: ' . implode(', ', array_keys($schema)),
+            array('status' => 400));
+    }
+    return rest_ensure_response(array('updated' => $updated));
 }
